@@ -1,0 +1,135 @@
+{
+    "pid": "20b4",
+    "name": "Tune 720BT",
+    "firmware": {
+        "version": "4.2.0",
+        "md5": "afbb0492467113a4d3b115ada0ccf7e4",
+        "bin": "T720_V4.2.0_OTA.bin",
+        "only_support_greater_than": "1.5.0",
+        "whats_new": {
+            "en": {
+                "title": "What's new?",
+                "content": [
+                    "Stability and performance improvement"
+                ]
+            },
+            "de": {
+                "title": "Was ist neu?",
+                "content": [
+                    "Stabilitäts- und Leistungsverbesserung"
+                ]
+            },
+            "es": {
+                "title": "Novedades",
+                "content": [
+                    "Mejora de la estabilidad y del rendimiento"
+                ]
+            },
+            "fr": {
+                "title": "ouveautés?",
+                "content": [
+                    "Amélioration de la stabilité et des performances"
+                ]
+            },
+            "it": {
+                "title": "Cosa c'è di nuovo?",
+                "content": [
+                    "Miglioramento della stabilità e delle prestazioni"
+                ]
+            },
+            "ja": {
+                "title": "最新情報?",
+                "content": [
+                    "安定性とパフォーマンスの向上"
+                ]
+            },
+            "ko": {
+                "title": "새 소식",
+                "content": [
+                    "안정성 및 성능 개선"
+                ]
+            },
+            "nl": {
+                "title": "Wat is er nieuw?",
+                "content": [
+                    "Verbetering van stabiliteit en prestaties"
+                ]
+            },
+            "pt": {
+                "title": "O que há de novo?",
+                "content": [
+                    "Melhoria da estabilidade e do desempenho"
+                ]
+            },
+            "ru": {
+                "title": "Что нового?",
+                "content": [
+                    "Улучшение стабильности и производительности"
+                ]
+            },
+            "zh": {
+                "title": "最新功能",
+                "content": [
+                    "提高稳定性和性能"
+                ]
+            }
+        }
+    },
+    "tone": {
+        "en": {
+            "md5": "162a20c7a3f8a9434ab4fe24dd5e6aaf",
+            "filename": "tone/English_prompt_v0.0.5.bin",
+            "version": "0.0.5"
+        },
+        "de": {
+            "md5": "0d8bb4a6780f98a5f0a7a00c20e79f1e",
+            "filename": "tone/German_prompt_v0.0.5.bin",
+            "version": "0.0.5"
+        },
+        "es": {
+            "md5": "d747a5e3d3b0e893fbaab0db90b825a5",
+            "filename": "tone/Spanish_prompt_v0.0.5.bin",
+            "version": "0.0.5"
+        },
+        "fr": {
+            "md5": "29a890d5ee0fb5965d0361c14ca41e4c",
+            "filename": "tone/French_prompt_v0.0.5.bin",
+            "version": "0.0.5"
+        },
+        "it": {
+            "md5": "7cfbdcd2914a883a6acf7ce932209cde",
+            "filename": "tone/Italian_prompt_v0.0.5.bin",
+            "version": "0.0.5"
+        },
+        "nl": {
+            "md5": "fce94e5aa2d9111c84d4ab144262a7ea",
+            "filename": "tone/Dutch_prompt_v0.0.5.bin",
+            "version": "0.0.5"
+        },
+        "pt": {
+            "md5": "35a5e0e2116376807355d0b27952ae76",
+            "filename": "tone/Portuguese_prompt_v0.0.5.bin",
+            "version": "0.0.5"
+        },
+        "ru": {
+            "md5": "3fe1cfddd5c070f26b621da33882b435",
+            "filename": "tone/Russian_prompt_v0.0.5.bin",
+            "version": "0.0.5"
+        },
+        "zh": {
+            "md5": "85e0338ba28afed12223d237094d6dd1",
+            "filename": "tone/Chinese_prompt_v0.0.5.bin",
+            "version": "0.0.5"
+        },
+        "ja": {
+            "md5": "50ceceef66d8c99869f72d2614bdbd10",
+            "filename": "tone/Japanese_prompt_v0.0.5.bin",
+            "version": "0.0.5"
+        },
+        "ko": {
+            "md5": "b6ab076b98c0bcf862fdeb058ef345fd",
+            "filename": "tone/Korean_prompt_v0.0.5.bin",
+            "version": "0.0.5"
+        }
+    }
+}
