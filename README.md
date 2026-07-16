@@ -41,10 +41,19 @@ Python, Bleak, WinRT bindings, FFmpeg, the LZMA encoder, icons, and the OEM reco
 Get-Content .\self-test.json
 ```
 
+## Tests
+
+```powershell
+.\run_tests.cmd
+```
+
+The tests automatically locate the project root from their location under `tests/`, so the repository can be moved or cloned to any directory without changing test paths. They are development files and are not imported by the application or bundled into the portable EXE.
+
 ## Source Layout
 
 - `app.py` — application entry point and packaged-runtime self-test
 - `tone_studio/` — application source
+- `tests/` — development test suite
 - `assets/` — required runtime binaries, recovery container, and icons
 - `requirements-build.txt` — pinned build dependencies
 - `build_portable.cmd` and `build_portable.ps1` — reproducible Windows build scripts
