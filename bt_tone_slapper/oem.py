@@ -21,11 +21,13 @@ OEM_SERVER_URL = (
     "English_prompt_v0.0.5.bin"
 )
 OEM_GITHUB_URL = (
-    "https://raw.githubusercontent.com/Swagmiral/BT-Tone-Slapper/main/assets/"
+    "https://raw.githubusercontent.com/Swagmiral/BT-Tone-Slapper/main/"
+    "OEM%20Backups/JBL%20Tune%20720BT/"
     "English_prompt_v0.0.5.bin"
 )
 OEM_GITHUB_MANUAL_URL = (
-    "https://github.com/Swagmiral/BT-Tone-Slapper/raw/refs/heads/main/assets/"
+    "https://github.com/Swagmiral/BT-Tone-Slapper/blob/main/"
+    "OEM%20Backups/JBL%20Tune%20720BT/"
     "English_prompt_v0.0.5.bin"
 )
 MAX_OEM_DOWNLOAD_SIZE = 1024 * 1024

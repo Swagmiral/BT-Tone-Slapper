@@ -39,7 +39,12 @@ from bt_tone_slapper.workflow import BASE_SHA256, PROMPT_LABELS, ToneSlapperEngi
 
 
 ROOT = PROJECT_ROOT
-OEM_SAMPLE = ROOT / "assets" / "English_prompt_v0.0.5.bin"
+OEM_SAMPLE = (
+    ROOT
+    / "OEM Backups"
+    / TUNE_720BT_PROFILE.display_name
+    / "English_prompt_v0.0.5.bin"
+)
 
 
 class FakeDownloadResponse:

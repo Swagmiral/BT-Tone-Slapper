@@ -28,7 +28,7 @@
 
 ## OEM recovery container
 
-- Repository fallback: `assets/English_prompt_v0.0.5.bin`
+- Repository fallback: `OEM Backups/JBL Tune 720BT/English_prompt_v0.0.5.bin`
 - Original source: <https://storage.harman.com/MyJBLHeadphones/ota/release/20b4/tone/English_prompt_v0.0.5.bin>
 - SHA-256: `91afbf099c9160fc251cf858c43b4d4df5bd9392cab5a6ab3b51ee0541d0ab9f`
 - The fallback file is not bundled into the portable EXE.

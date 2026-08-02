@@ -19,6 +19,15 @@ The OEM file is saved beside the EXE after successful verification. Build reuses
 copy when valid; Restore OEM always attempts a fresh manufacturer download first.
 Unknown file sizes or hashes are rejected and are never trusted automatically.
 
+The pinned GitHub recovery copies are organized separately by device model:
+
+```text
+OEM Backups\JBL Tune 720BT\English_prompt_v0.0.5.bin
+```
+
+This repository folder is only the fallback source. Runtime downloads remain directly
+beside the portable EXE.
+
 ## Build
 
 Requirements on the build PC:
@@ -78,7 +87,8 @@ license and remain under their respective terms described in
 - `app.py` — application entry point and packaged-runtime self-test
 - `bt_tone_slapper/` — application source
 - `tests/` — development test suite
-- `assets/` — runtime binaries, icons, and the pinned GitHub fallback container
+- `assets/` — required runtime binaries and icons
+- `OEM Backups/` — pinned OEM recovery containers organized by device model
 - `requirements-build.txt` — pinned build dependencies
 - `build_portable.cmd` and `build_portable.ps1` — reproducible Windows build scripts
 
