@@ -1,6 +1,7 @@
 /.venv/
 /build/
-/dist/
+/dist/*
+!/dist/BTToneSlapper.exe
 /*.spec
 /.pytest_cache/
 /__pycache__/

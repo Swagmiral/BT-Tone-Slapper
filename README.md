@@ -2,6 +2,8 @@
 
 Portable Windows application for replacing event sounds on supported Bluetooth audio devices. The current release supports JBL Tune 720BT English voice-prompt containers.
 
+The prebuilt portable application is available at `dist/BTToneSlapper.exe`.
+
 ## Features
 
 - Converts WAV, MP3, FLAC, OGG, Opus, M4A, AAC, WMA, AIFF, AIF, and CAF audio automatically.
