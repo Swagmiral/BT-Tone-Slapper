@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, Mock, patch
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from bt_tone_slapper import APP_AUTHOR, LICENSE_NAME, PROJECT_URL
+from bt_tone_slapper import APP_AUTHOR, APP_NAME, LICENSE_NAME, PROJECT_URL
 from bt_tone_slapper.bluetooth import DiscoveredDevice, scan_devices
 from bt_tone_slapper.container import build_container, validate_container
 from bt_tone_slapper.device_profiles import (
@@ -23,10 +23,12 @@ from bt_tone_slapper.device_profiles import (
 )
 from bt_tone_slapper.errors import UserFacingError, user_error_message
 from bt_tone_slapper.gui import (
+    CLOSE_BLOCKED_TEXT,
     DONATE_URL,
     SUPPORTED_AUDIO_FORMATS,
     SUPPORTED_DEVICES,
     ToneSlapperWindow,
+    WRITE_WARNING_TEXT,
 )
 from bt_tone_slapper.protocol import SERVICE_UUID, WRITE_UUID, NOTIFY_UUID
 from bt_tone_slapper.oem import (
@@ -83,6 +85,7 @@ class CoreTests(unittest.TestCase):
             window = ToneSlapperWindow(root)
             root.update_idletasks()
 
+            self.assertTrue(root.protocol("WM_DELETE_WINDOW"))
             self.assertEqual(window.prompt_empty_label.cget("text"), "Select a device first")
             self.assertEqual(str(window.prompt_empty_label.cget("anchor")), "center")
             self.assertEqual(str(window.prompt_empty_label.cget("justify")), "center")
@@ -91,6 +94,13 @@ class CoreTests(unittest.TestCase):
             self.assertIn("bold", prompt_empty_font)
             self.assertGreaterEqual(window.prompt_empty_label.winfo_reqheight(), 40)
             self.assertTrue(window.prompt_empty_label.winfo_manager())
+            self.assertFalse(window.write_warning_label.winfo_manager())
+            self.assertEqual(window.write_warning_label.cget("text"), WRITE_WARNING_TEXT)
+            window._set_write_warning_visible(True)
+            root.update_idletasks()
+            self.assertTrue(window.write_warning_label.winfo_manager())
+            window._set_write_warning_visible(False)
+            self.assertFalse(window.write_warning_label.winfo_manager())
             self.assertFalse(window.prompt_tree.winfo_manager())
             self.assertEqual(window.prompt_tree.get_children(), ())
             self.assertEqual(str(window.validate_button.cget("state")), "disabled")
@@ -111,6 +121,83 @@ class CoreTests(unittest.TestCase):
             )
         finally:
             root.destroy()
+
+    def test_close_is_blocked_during_upload_and_oem_restore(self) -> None:
+        protected_states = (
+            ("upload", True, None),
+            ("recovery", True, None),
+            ("oem-official", True, "restore"),
+        )
+        for active_operation, busy, oem_context in protected_states:
+            with self.subTest(
+                active_operation=active_operation,
+                oem_context=oem_context,
+            ):
+                window = object.__new__(ToneSlapperWindow)
+                window.root = Mock()
+                window.active_operation = active_operation
+                window.busy = busy
+                window._oem_context = oem_context
+
+                with patch("bt_tone_slapper.gui.messagebox.showwarning") as warning:
+                    window._request_close()
+
+                warning.assert_called_once_with(
+                    APP_NAME,
+                    CLOSE_BLOCKED_TEXT,
+                    parent=window.root,
+                )
+                window.root.destroy.assert_not_called()
+
+    def test_close_remains_available_outside_write_operations(self) -> None:
+        window = object.__new__(ToneSlapperWindow)
+        window.root = Mock()
+        window.active_operation = "build"
+        window.busy = True
+        window._oem_context = "build"
+
+        with patch("bt_tone_slapper.gui.messagebox.showwarning") as warning:
+            window._request_close()
+
+        warning.assert_not_called()
+        window.root.destroy.assert_called_once_with()
+
+    def test_write_confirmations_explain_risk_and_recovery(self) -> None:
+        window = object.__new__(ToneSlapperWindow)
+        window._device_identifier = Mock(return_value="connected-device")
+        window._selected_profile_id = Mock(
+            return_value=TUNE_720BT_PROFILE.profile_id
+        )
+        window.last_build = SimpleNamespace(
+            output=str(OEM_SAMPLE),
+            profile_id=TUNE_720BT_PROFILE.profile_id,
+            sha256=BASE_SHA256,
+            dry_run={"packet_count": 1},
+        )
+        window._run_background = Mock()
+        window._acquire_oem = Mock()
+
+        with patch(
+            "bt_tone_slapper.gui.messagebox.askyesno",
+            return_value=False,
+        ) as confirm:
+            window.upload()
+        upload_warning = confirm.call_args.args[1]
+        self.assertIn("interrupted or incompatible write", upload_warning)
+        self.assertIn("do not close the app", upload_warning)
+        self.assertIn("Restore OEM English", upload_warning)
+        window._run_background.assert_not_called()
+
+        with patch(
+            "bt_tone_slapper.gui.messagebox.askyesno",
+            return_value=False,
+        ) as confirm:
+            window.restore()
+        restore_warning = confirm.call_args.args[1]
+        self.assertIn("cryptographically verified", restore_warning)
+        self.assertIn("do not close the app", restore_warning)
+        self.assertIn("another OEM restore attempt", restore_warning)
+        window._acquire_oem.assert_not_called()
 
     def test_runtime_assets_and_oem_fixture(self) -> None:
         engine = test_engine()

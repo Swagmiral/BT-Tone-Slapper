@@ -65,6 +65,12 @@ SUPPORTED_AUDIO_FORMATS = (
     "CAF",
 )
 SUPPORTED_DEVICES = tuple(profile.display_name for profile in SUPPORTED_PROFILES)
+WRITE_WARNING_TEXT = "Write in progress — do not power off or disconnect."
+CLOSE_BLOCKED_TEXT = (
+    "A headphone write or OEM restore is still in progress.\n\n"
+    "Do not power off or disconnect the headphones, disable Bluetooth, close the app, "
+    "or let the PC sleep. Wait until the Upload button reports Success!"
+)
 
 
 class ToneSlapperWindow:
@@ -121,6 +127,7 @@ class ToneSlapperWindow:
         self.target_var = StringVar()
         self.output_var = StringVar(value=self.OPEN_TEXT)
         self._build_layout()
+        self.root.protocol("WM_DELETE_WINDOW", self._request_close)
         self.root.bind("<F1>", lambda _event: self.show_help())
         self._refresh_prompt_rows()
         self._update_buttons()
@@ -231,6 +238,14 @@ class ToneSlapperWindow:
         )
         self.build_button.pack(fill=X)
         self.build_button.bind("<Button-1>", self._build_button_pressed, add="+")
+        self.write_warning_label = ttk.Label(
+            action_controls,
+            text=WRITE_WARNING_TEXT,
+            style="WriteWarning.TLabel",
+            font=("Segoe UI Semibold", 10, "bold"),
+            anchor="center",
+            justify="center",
+        )
         self.upload_button = ProgressButton(
             action_controls,
             text=self.UPLOAD_TEXT,
@@ -369,6 +384,37 @@ class ToneSlapperWindow:
         if self._help_window is not None and self._help_window.winfo_exists():
             self._help_window.destroy()
         self._help_window = None
+
+    def _close_is_blocked(self) -> bool:
+        if self.active_operation in {"upload", "recovery"}:
+            return True
+        return (
+            self.busy
+            and self._oem_context == "restore"
+            and bool(self.active_operation and self.active_operation.startswith("oem-"))
+        )
+
+    def _request_close(self) -> None:
+        if self._close_is_blocked():
+            messagebox.showwarning(
+                APP_NAME,
+                CLOSE_BLOCKED_TEXT,
+                parent=self.root,
+            )
+            return
+        self.root.destroy()
+
+    def _set_write_warning_visible(self, visible: bool) -> None:
+        if visible:
+            if not self.write_warning_label.winfo_manager():
+                self.write_warning_label.pack(
+                    fill=X,
+                    pady=(10, 0),
+                    before=self.upload_button,
+                )
+            return
+        if self.write_warning_label.winfo_manager():
+            self.write_warning_label.pack_forget()
 
     def donate(self) -> None:
         try:
@@ -786,6 +832,7 @@ class ToneSlapperWindow:
                 self.upload_button.begin("Downloading OEM...")
         elif operation_name in {"upload", "recovery"}:
             self.upload_button.begin("Verifying headphones…")
+        self._set_write_warning_visible(operation_name in {"upload", "recovery"})
         self._update_buttons()
 
         def worker() -> None:
@@ -825,6 +872,7 @@ class ToneSlapperWindow:
         self.busy = False
         self.active_operation = None
         self.active_total_packets = 0
+        self._set_write_warning_visible(False)
         self.scan_button.configure(text=self.SCAN_TEXT)
         self.build_button.configure(text=self.BUILD_TEXT)
         self.output_var.set(self.last_build.output if self.last_build else self.OPEN_TEXT)
@@ -1216,11 +1264,17 @@ class ToneSlapperWindow:
             return
         candidate = Path(self.last_build.output)
         confirmation = (
-            "Upload the selected prompt container to the headphones?\n\n"
+            "Write the selected prompt container to the headphones?\n\n"
             f"Device: {identifier}\n"
             f"File: {candidate.name}\n"
             f"SHA-256: {self.last_build.sha256}\n\n"
-            "Keep the headphones powered on. Restore OEM can download a verified recovery image."
+            "This modifies prompt data stored on the headphones. An interrupted or "
+            "incompatible write may leave voice prompts unavailable and require OEM recovery.\n\n"
+            "Verify the device model and file before continuing. Once writing starts, do not "
+            "close the app, power off or disconnect the headphones, disable Bluetooth, or let "
+            "the PC sleep. Wait until the Upload button reports Success!\n\n"
+            "If the upload fails, reconnect and rescan the headphones, then use Restore OEM "
+            "English to write the verified recovery image."
         )
         if not messagebox.askyesno(APP_NAME, confirmation, icon="warning"):
             return
@@ -1245,11 +1299,15 @@ class ToneSlapperWindow:
         if not identifier or device_profile_id is None:
             return
         confirmation = (
-            "Restore the verified OEM English prompt image?\n\n"
+            "Write the verified OEM English recovery image to the headphones?\n\n"
             f"Device: {identifier}\n"
             f"Recovery SHA-256: {BASE_SHA256}\n\n"
-            "The OEM file will be downloaded and verified before the physical BLE write. "
-            "Keep the headphones powered on."
+            "The OEM file will be downloaded and cryptographically verified before writing. "
+            "Once writing starts, do not close the app, power off or disconnect the headphones, "
+            "disable Bluetooth, or let the PC sleep. Wait until the Upload button reports "
+            "Success!\n\n"
+            "Interrupting recovery may leave voice prompts unavailable and require another OEM "
+            "restore attempt."
         )
         if not messagebox.askyesno(APP_NAME, confirmation, icon="warning"):
             return

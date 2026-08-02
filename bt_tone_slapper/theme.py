@@ -141,6 +141,13 @@ def apply_dark_theme(root: Tk) -> ttk.Style:
         font=("Segoe UI Semibold", 11),
         padding=(0, 0),
     )
+    style.configure(
+        "WriteWarning.TLabel",
+        background=COLORS["window"],
+        foreground=COLORS["accent"],
+        font=("Segoe UI Semibold", 10, "bold"),
+        padding=(0, 2),
+    )
 
     style.configure(
         "TButton",
