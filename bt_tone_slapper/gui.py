@@ -6,6 +6,7 @@ import time
 import traceback
 import webbrowser
 from pathlib import Path
+from typing import Callable
 from tkinter import (
     BOTH,
     Canvas,
@@ -30,6 +31,7 @@ from .device_profiles import (
     resolve_device_profile,
 )
 from .errors import user_error_message
+from .oem import OEM_GITHUB_MANUAL_URL, OemImage
 from .resources import asset_path
 from .theme import COLORS, apply_dark_theme, apply_dark_title_bar
 from .widgets import ProgressButton, ResetButton
@@ -103,6 +105,8 @@ class ToneSlapperWindow:
         )
         self._hovered_prompt: int | None = None
         self._help_window: Toplevel | None = None
+        self._pending_oem_action: Callable[[OemImage], None] | None = None
+        self._oem_context: str | None = None
         self._reset_buttons: dict[int, ResetButton] = {}
         self._source_labels: dict[int, ttk.Label] = {}
         self._help_icon = PhotoImage(
@@ -309,8 +313,9 @@ class ToneSlapperWindow:
             ),
             (
                 "Recovery",
-                "Restore OEM English uploads the bundled original English prompts when a "
-                "recovery is needed.",
+                "Restore OEM English downloads and verifies the original English prompts "
+                "before uploading them. If the manufacturer download fails, the app can "
+                "use the pinned copy from the BT Tone Slapper GitHub repository.",
             ),
             (
                 "Currently supported devices",
@@ -731,6 +736,11 @@ class ToneSlapperWindow:
             self.build_button.configure(text="Preparing audio…")
         elif operation_name == "open":
             self.output_var.set("Opening and validating…")
+        elif operation_name.startswith("oem-"):
+            if self._oem_context == "build":
+                self.build_button.configure(text="Downloading OEM...")
+            else:
+                self.upload_button.begin("Downloading OEM...")
         elif operation_name in {"upload", "recovery"}:
             self.upload_button.begin("Verifying headphones…")
         self._update_buttons()
@@ -739,16 +749,24 @@ class ToneSlapperWindow:
             try:
                 result = operation()
             except Exception as error:
-                detail = user_error_message(operation_name, error)
                 traceback.print_exc()
-                self.root.after(0, lambda: self._finish_error(detail))
+                self.root.after(0, lambda error=error: self._finish_error(error))
             else:
                 self.root.after(0, lambda: self._finish_success(result, success))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _finish_error(self, detail: str) -> None:
-        if self.active_operation in {"upload", "recovery"}:
+    def _finish_error(self, error: Exception) -> None:
+        operation_name = self.active_operation or ""
+        detail = user_error_message(operation_name, error)
+        if operation_name.startswith("oem-"):
+            self._reset_operation_ui()
+            if operation_name == "oem-official":
+                self.root.after_idle(lambda: self._offer_github_oem(detail))
+            else:
+                self.root.after_idle(lambda: self._show_manual_oem_recovery(detail))
+            return
+        if operation_name in {"upload", "recovery"}:
             self.upload_button.set_progress(1.0, "Upload failed")
         messagebox.showerror(APP_NAME, detail)
         self._reset_operation_ui()
@@ -835,10 +853,227 @@ class ToneSlapperWindow:
                 f"No connected {TUNE_720BT_PROFILE.display_name} was found.",
             )
 
+    def _acquire_oem(
+        self,
+        context: str,
+        ready: Callable[[OemImage], None],
+        *,
+        always_download: bool,
+    ) -> None:
+        if self.busy:
+            return
+        if not always_download:
+            cached = self.engine.cached_oem()
+            if cached is not None:
+                ready(cached)
+                return
+        self._pending_oem_action = ready
+        self._oem_context = context
+        self._run_background(
+            "oem-official",
+            self.engine.download_official_oem,
+            self._oem_acquired,
+        )
+
+    def _oem_acquired(self, image: OemImage) -> None:
+        ready = self._pending_oem_action
+        self._pending_oem_action = None
+        self._oem_context = None
+        if ready is not None:
+            self.root.after_idle(lambda: ready(image))
+
+    def _clear_oem_acquisition(self) -> None:
+        self._pending_oem_action = None
+        self._oem_context = None
+
+    def _offer_github_oem(self, detail: str) -> None:
+        choice = self._ask_oem_action(
+            "OEM download failed",
+            f"{detail}\n\n"
+            "Download the pinned OEM recovery file from the BT Tone Slapper "
+            "GitHub repository instead?",
+            "Download from GitHub",
+        )
+        if choice != "continue":
+            self._clear_oem_acquisition()
+            return
+        self._run_background(
+            "oem-github",
+            self.engine.download_github_oem,
+            self._oem_acquired,
+        )
+
+    def _ask_oem_action(
+        self,
+        title: str,
+        message: str,
+        continue_text: str,
+    ) -> str | None:
+        result: dict[str, str | None] = {"value": None}
+        dialog = Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title(f"{APP_NAME} - {title}")
+        dialog.configure(background=COLORS["window"])
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        def close(value: str | None = None) -> None:
+            result["value"] = value
+            dialog.destroy()
+
+        dialog.protocol("WM_DELETE_WINDOW", close)
+        dialog.bind("<Escape>", lambda _event: close())
+        content = ttk.Frame(dialog, padding=(22, 18))
+        content.pack(fill=BOTH, expand=True)
+        ttk.Label(content, text=title, style="HelpTitle.TLabel").pack(
+            anchor="w",
+            pady=(0, 12),
+        )
+        ttk.Label(
+            content,
+            text=message,
+            style="HelpBody.TLabel",
+            wraplength=500,
+            justify=LEFT,
+        ).pack(anchor="w", fill=X, pady=(0, 18))
+        buttons = ttk.Frame(content)
+        buttons.pack(fill=X)
+        ttk.Button(
+            buttons,
+            text="Cancel",
+            style="Ghost.TButton",
+            command=close,
+            takefocus=False,
+        ).pack(side=RIGHT)
+        ttk.Button(
+            buttons,
+            text=continue_text,
+            style="Accent.TButton",
+            command=lambda: close("continue"),
+            takefocus=False,
+        ).pack(side=RIGHT, padx=(0, 8))
+
+        dialog.update_idletasks()
+        apply_dark_title_bar(dialog)
+        width = 550
+        height = max(230, dialog.winfo_reqheight())
+        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
+        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.deiconify()
+        dialog.grab_set()
+        self.root.wait_window(dialog)
+        return result["value"]
+
+    def _show_manual_oem_recovery(self, detail: str) -> None:
+        selected: dict[str, Path | None] = {"path": None}
+        dialog = Toplevel(self.root)
+        dialog.withdraw()
+        dialog.title(f"{APP_NAME} - Manual OEM recovery")
+        dialog.configure(background=COLORS["window"])
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        def close() -> None:
+            dialog.destroy()
+
+        def open_github() -> None:
+            try:
+                opened = webbrowser.open(OEM_GITHUB_MANUAL_URL, new=2)
+            except Exception:
+                opened = False
+            if not opened:
+                messagebox.showerror(
+                    APP_NAME,
+                    f"Could not open GitHub. Visit:\n\n{OEM_GITHUB_MANUAL_URL}",
+                    parent=dialog,
+                )
+
+        def select_file() -> None:
+            chosen = filedialog.askopenfilename(
+                parent=dialog,
+                title="Select the downloaded OEM file",
+                filetypes=[("OEM prompt container", "*.bin"), ("All files", "*.*")],
+            )
+            if chosen:
+                selected["path"] = Path(chosen)
+                dialog.destroy()
+
+        dialog.protocol("WM_DELETE_WINDOW", close)
+        dialog.bind("<Escape>", lambda _event: close())
+        content = ttk.Frame(dialog, padding=(22, 18))
+        content.pack(fill=BOTH, expand=True)
+        ttk.Label(
+            content,
+            text="Automatic OEM download failed",
+            style="HelpTitle.TLabel",
+        ).pack(anchor="w", pady=(0, 12))
+        ttk.Label(
+            content,
+            text=(
+                f"{detail}\n\n"
+                "Download the OEM file manually from the BT Tone Slapper GitHub "
+                "repository, then select the downloaded file."
+            ),
+            style="HelpBody.TLabel",
+            wraplength=520,
+            justify=LEFT,
+        ).pack(anchor="w", fill=X, pady=(0, 18))
+        buttons = ttk.Frame(content)
+        buttons.pack(fill=X)
+        ttk.Button(
+            buttons,
+            text="Cancel",
+            style="Ghost.TButton",
+            command=close,
+            takefocus=False,
+        ).pack(side=RIGHT)
+        ttk.Button(
+            buttons,
+            text="Select downloaded file",
+            style="Accent.TButton",
+            command=select_file,
+            takefocus=False,
+        ).pack(side=RIGHT, padx=(0, 8))
+        ttk.Button(
+            buttons,
+            text="Open GitHub",
+            command=open_github,
+            takefocus=False,
+        ).pack(side=LEFT)
+
+        dialog.update_idletasks()
+        apply_dark_title_bar(dialog)
+        width = 570
+        height = max(250, dialog.winfo_reqheight())
+        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
+        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.deiconify()
+        dialog.grab_set()
+        self.root.wait_window(dialog)
+
+        chosen_path = selected["path"]
+        if chosen_path is None:
+            self._clear_oem_acquisition()
+            return
+        self._run_background(
+            "oem-manual",
+            lambda: self.engine.import_manual_oem(chosen_path),
+            self._oem_acquired,
+        )
+
     def build(self) -> None:
         if self.target_profile_id is None:
             self._show_flying_tip(self.build_button, "select target device")
             return
+        self._acquire_oem(
+            "build",
+            self._build_with_oem,
+            always_download=False,
+        )
+
+    def _build_with_oem(self, oem_image: OemImage) -> None:
         output = filedialog.asksaveasfilename(
             title="Save generated tone container",
             defaultextension=".bin",
@@ -860,6 +1095,8 @@ class ToneSlapperWindow:
                 assignments,
                 output_path,
                 profile_id=self.target_profile_id,
+                base_image=oem_image.path,
+                expected_base_sha256=oem_image.sha256,
                 progress=self._thread_progress,
             ),
             self._build_complete,
@@ -937,7 +1174,7 @@ class ToneSlapperWindow:
             f"Device: {identifier}\n"
             f"File: {candidate.name}\n"
             f"SHA-256: {self.last_build.sha256}\n\n"
-            "Keep the headphones powered on. The verified OEM English recovery image is bundled."
+            "Keep the headphones powered on. Restore OEM can download a verified recovery image."
         )
         if not messagebox.askyesno(APP_NAME, confirmation, icon="warning"):
             return
@@ -965,19 +1202,37 @@ class ToneSlapperWindow:
             "Restore the verified OEM English prompt image?\n\n"
             f"Device: {identifier}\n"
             f"Recovery SHA-256: {BASE_SHA256}\n\n"
-            "This performs a physical BLE write. Keep the headphones powered on."
+            "The OEM file will be downloaded and verified before the physical BLE write. "
+            "Keep the headphones powered on."
         )
         if not messagebox.askyesno(APP_NAME, confirmation, icon="warning"):
             return
+        self._acquire_oem(
+            "restore",
+            lambda image: self._restore_with_oem(
+                identifier,
+                device_profile_id,
+                image,
+            ),
+            always_download=True,
+        )
+
+    def _restore_with_oem(
+        self,
+        identifier: str,
+        device_profile_id: str,
+        oem_image: OemImage,
+    ) -> None:
         self._run_background(
             "recovery",
             lambda: self.engine.restore_oem(
                 identifier,
+                oem_image,
                 device_profile_id=device_profile_id,
                 progress=self._thread_progress,
             ),
             self._upload_complete,
-            total_packets=self.engine.recovery_packet_count,
+            total_packets=oem_image.packet_count,
         )
 
     def _upload_complete(self, _result) -> None:

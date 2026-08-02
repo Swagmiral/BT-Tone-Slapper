@@ -19,6 +19,12 @@ def asset_path(name: str) -> Path:
     return path
 
 
+def portable_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
 def user_data_root() -> Path:
     override = os.environ.get("BT_TONE_SLAPPER_DATA")
     root = Path(override) if override else Path(os.environ.get("LOCALAPPDATA", Path.home())) / "BTToneSlapper"

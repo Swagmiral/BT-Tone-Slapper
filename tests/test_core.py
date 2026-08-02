@@ -27,25 +27,127 @@ from bt_tone_slapper.gui import (
     ToneSlapperWindow,
 )
 from bt_tone_slapper.protocol import SERVICE_UUID, WRITE_UUID, NOTIFY_UUID
+from bt_tone_slapper.oem import (
+    OEM_GITHUB_URL,
+    OEM_SERVER_URL,
+    OemAcquisitionError,
+    OemStore,
+)
 from bt_tone_slapper.uploader import build_dry_run
 from bt_tone_slapper.workflow import BASE_SHA256, PROMPT_LABELS, ToneSlapperEngine
 
 
 ROOT = PROJECT_ROOT
+OEM_SAMPLE = ROOT / "assets" / "English_prompt_v0.0.5.bin"
+
+
+class FakeDownloadResponse:
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+        self.status = 200
+        self.headers = {"Content-Length": str(len(data))}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc_value, _traceback):
+        return False
+
+    def read(self, limit: int = -1) -> bytes:
+        return self.data if limit < 0 else self.data[:limit]
+
+
+def test_engine() -> ToneSlapperEngine:
+    return ToneSlapperEngine(base_image=OEM_SAMPLE)
 
 
 class CoreTests(unittest.TestCase):
-    def test_bundled_assets_and_oem_container(self) -> None:
-        engine = ToneSlapperEngine()
+    def test_runtime_assets_and_oem_fixture(self) -> None:
+        engine = test_engine()
         self.assertEqual(hashlib.sha256(engine.base_image.read_bytes()).hexdigest(), BASE_SHA256)
         self.assertTrue(validate_container(engine.base_image).valid)
 
     def test_oem_packet_plan(self) -> None:
-        payload = (ROOT / "assets" / "English_prompt_v0.0.5.bin").read_bytes()
+        payload = OEM_SAMPLE.read_bytes()
         report = build_dry_run(payload, language=1)
         self.assertEqual(report.packet_count, 372)
         self.assertEqual(report.data_packet_count, 370)
         self.assertEqual(report.chunk_size, 201)
+
+    def test_official_oem_download_replaces_invalid_cache(self) -> None:
+        payload = OEM_SAMPLE.read_bytes()
+        with TemporaryDirectory() as temporary:
+            cache = Path(temporary) / OEM_SAMPLE.name
+            cache.write_bytes(b"invalid cache")
+            store = OemStore(cache)
+            with patch(
+                "bt_tone_slapper.oem.urlopen",
+                return_value=FakeDownloadResponse(payload),
+            ) as downloader:
+                image = store.download_from_manufacturer()
+
+            self.assertEqual(cache.read_bytes(), payload)
+            self.assertEqual(image.sha256, BASE_SHA256)
+            self.assertEqual(image.packet_count, 372)
+            request = downloader.call_args.args[0]
+            self.assertEqual(request.full_url, OEM_SERVER_URL)
+
+    def test_changed_official_oem_is_rejected_without_replacing_cache(self) -> None:
+        payload = OEM_SAMPLE.read_bytes()
+        changed = bytearray(payload)
+        changed[-1] ^= 0x01
+        with TemporaryDirectory() as temporary:
+            cache = Path(temporary) / OEM_SAMPLE.name
+            cache.write_bytes(payload)
+            store = OemStore(cache)
+            with patch(
+                "bt_tone_slapper.oem.urlopen",
+                return_value=FakeDownloadResponse(bytes(changed)),
+            ):
+                with self.assertRaisesRegex(
+                    OemAcquisitionError,
+                    "does not match the verified SHA-256",
+                ):
+                    store.download_from_manufacturer()
+
+            self.assertEqual(cache.read_bytes(), payload)
+
+    def test_github_oem_fallback_is_also_pinned(self) -> None:
+        payload = OEM_SAMPLE.read_bytes()
+        with TemporaryDirectory() as temporary:
+            cache = Path(temporary) / OEM_SAMPLE.name
+            store = OemStore(cache)
+            with patch(
+                "bt_tone_slapper.oem.urlopen",
+                return_value=FakeDownloadResponse(payload),
+            ) as downloader:
+                image = store.download_from_github()
+
+            self.assertEqual(image.path, cache.resolve())
+            self.assertEqual(cache.read_bytes(), payload)
+            request = downloader.call_args.args[0]
+            self.assertEqual(request.full_url, OEM_GITHUB_URL)
+
+    def test_restore_oem_always_starts_with_manufacturer_download(self) -> None:
+        window = object.__new__(ToneSlapperWindow)
+        window.busy = False
+        window.engine = Mock()
+        window.engine.cached_oem = Mock()
+        window.engine.download_official_oem = Mock()
+        window._run_background = Mock()
+        window._pending_oem_action = None
+        window._oem_context = None
+        ready = Mock()
+
+        window._acquire_oem("restore", ready, always_download=True)
+
+        window.engine.cached_oem.assert_not_called()
+        self.assertIs(window._pending_oem_action, ready)
+        self.assertEqual(window._oem_context, "restore")
+        operation_name, operation, success = window._run_background.call_args.args
+        self.assertEqual(operation_name, "oem-official")
+        self.assertIs(operation, window.engine.download_official_oem)
+        self.assertEqual(success.__func__, ToneSlapperWindow._oem_acquired)
 
     def test_prompt_map_and_live_uuids(self) -> None:
         self.assertEqual(len(PROMPT_LABELS), 11)
@@ -55,14 +157,14 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(WRITE_UUID.endswith("0002"))
 
     def test_open_existing_prepares_upload(self) -> None:
-        engine = ToneSlapperEngine()
+        engine = test_engine()
         result = engine.open_existing(engine.base_image)
         self.assertTrue(result.validation.valid)
         self.assertEqual(result.sha256, BASE_SHA256)
         self.assertEqual(result.dry_run["packet_count"], 372)
 
     def test_build_overwrites_without_sidecar(self) -> None:
-        engine = ToneSlapperEngine()
+        engine = test_engine()
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             output = root / "reused_name.bin"
@@ -78,7 +180,7 @@ class CoreTests(unittest.TestCase):
             self.assertFalse(output.with_suffix(".bin.json").exists())
 
     def test_build_without_assignments_saves_exact_oem_image(self) -> None:
-        engine = ToneSlapperEngine()
+        engine = test_engine()
         with TemporaryDirectory() as temporary:
             output = Path(temporary) / "English_prompt_OEM.bin"
             result = engine.build({}, output)
@@ -89,7 +191,7 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result.dry_run["packet_count"], 372)
 
     def test_upload_uses_validated_in_memory_snapshot(self) -> None:
-        engine = ToneSlapperEngine()
+        engine = test_engine()
         with TemporaryDirectory() as temporary:
             candidate = Path(temporary) / "candidate.bin"
             expected_image = engine.base_image.read_bytes()
@@ -127,7 +229,7 @@ class CoreTests(unittest.TestCase):
             self.assertFalse(candidate.exists())
 
     def test_upload_changed_file_explains_how_to_continue(self) -> None:
-        engine = ToneSlapperEngine()
+        engine = test_engine()
         with self.assertRaisesRegex(
             ValueError,
             "File changed since it was loaded.*Open it again or rebuild before uploading",
@@ -274,7 +376,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(window.upload_button.reset_calls, [False])
 
     def test_upload_rejects_unsupported_profile_before_ble(self) -> None:
-        engine = ToneSlapperEngine()
+        engine = test_engine()
         with patch.object(engine, "_upload") as upload:
             with self.assertRaisesRegex(
                 UserFacingError,

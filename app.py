@@ -25,7 +25,6 @@ def self_test(output: Path) -> None:
     from tkinter import Tk
 
     from bt_tone_slapper.gui import ToneSlapperWindow
-    from bt_tone_slapper.uploader import build_dry_run
     from bt_tone_slapper.workflow import ToneSlapperEngine
 
     checkpoint("application-imported")
@@ -42,8 +41,8 @@ def self_test(output: Path) -> None:
     checkpoint("gui-constructed", **gui_size)
     engine = ToneSlapperEngine()
     checkpoint("assets-verified")
-    validation = engine.validate(engine.base_image)
-    checkpoint("oem-validated", valid=validation.valid)
+    cached_oem = engine.cached_oem()
+    checkpoint("oem-cache-checked", present=cached_oem is not None)
     ffmpeg_result = subprocess.run(
         [str(engine.ffmpeg), "-version"],
         check=False,
@@ -55,9 +54,10 @@ def self_test(output: Path) -> None:
     report = {
         "version": APP_VERSION,
         "assets_verified": True,
-        "oem_container_valid": validation.valid,
-        "oem_sha256": validation.sha256,
-        "oem_packet_count": build_dry_run(engine.base_image.read_bytes(), language=1).packet_count,
+        "oem_cache_present": cached_oem is not None,
+        "oem_container_valid": cached_oem.validation.valid if cached_oem else None,
+        "oem_sha256": cached_oem.sha256 if cached_oem else None,
+        "oem_packet_count": cached_oem.packet_count if cached_oem else None,
         "ffmpeg_executable": ffmpeg_result.returncode == 0,
         "ffmpeg_version_line": ffmpeg_result.stdout.splitlines()[0] if ffmpeg_result.stdout else None,
         "bleak_import": BleakClient is not None,

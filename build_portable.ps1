@@ -28,7 +28,9 @@ if ($LASTEXITCODE -ne 0) {
     --hidden-import ctypes.wintypes `
     --collect-all bleak `
     --collect-submodules winrt `
-    --add-data "$Root\assets;assets" `
+    --add-data "$Root\assets\ffmpeg.exe;assets" `
+    --add-data "$Root\assets\LzmaAlone.exe;assets" `
+    --add-data "$Root\assets\icons;assets\icons" `
     "$Root\app.py"
 
 if ($LASTEXITCODE -ne 0) {

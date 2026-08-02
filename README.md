@@ -10,9 +10,14 @@ The prebuilt portable application is available at `dist/BTToneSlapper.exe`.
 - Rebuilds the indexed mSBC prompt bank and all known integrity fields.
 - Opens and validates existing compatible `.bin` containers.
 - Uploads through the verified JBL BLE service after explicit user confirmation.
-- Includes a hash-verified OEM English recovery container.
+- Downloads and verifies the OEM English recovery container before every restore.
+- Falls back to the pinned OEM copy in this GitHub repository when the manufacturer download fails.
 - Restricts device selection and upload to the JBL Tune 720BT profile.
 - Produces a single portable EXE with no dependencies on the destination PC.
+
+The OEM file is saved beside the EXE after successful verification. Build reuses that
+copy when valid; Restore OEM always attempts a fresh manufacturer download first.
+Unknown file sizes or hashes are rejected and are never trusted automatically.
 
 ## Build
 
@@ -34,7 +39,9 @@ The script creates an isolated local build environment and writes:
 dist\BTToneSlapper.exe
 ```
 
-Python, Bleak, WinRT bindings, FFmpeg, the LZMA encoder, icons, and the OEM recovery container are bundled into the EXE. The destination PC does not need Python or additional packages.
+Python, Bleak, WinRT bindings, FFmpeg, the LZMA encoder, and icons are bundled into
+the EXE. The OEM recovery container is deliberately not bundled. The destination PC
+does not need Python or additional packages.
 
 ## Verify The EXE
 
@@ -56,7 +63,7 @@ The tests automatically locate the project root from their location under `tests
 - `app.py` — application entry point and packaged-runtime self-test
 - `bt_tone_slapper/` — application source
 - `tests/` — development test suite
-- `assets/` — required runtime binaries, recovery container, and icons
+- `assets/` — runtime binaries, icons, and the pinned GitHub fallback container
 - `requirements-build.txt` — pinned build dependencies
 - `build_portable.cmd` and `build_portable.ps1` — reproducible Windows build scripts
 

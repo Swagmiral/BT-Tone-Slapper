@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import hashlib
 import json
-import shutil
 import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -26,12 +25,16 @@ from .device_profiles import (
     resolve_device_profile,
 )
 from .errors import UserFacingError
-from .resources import asset_path, log_directory
+from .oem import (
+    OEM_FILENAME as BASE_FILENAME,
+    OEM_SHA256 as BASE_SHA256,
+    OemImage,
+    OemStore,
+)
+from .resources import asset_path, log_directory, portable_root
 from .uploader import UploadError, UploadReport, build_dry_run, run_upload
 
 
-BASE_FILENAME = "English_prompt_v0.0.5.bin"
-BASE_SHA256 = "91afbf099c9160fc251cf858c43b4d4df5bd9392cab5a6ab3b51ee0541d0ab9f"
 FFMPEG_SHA256 = "2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3"
 LZMA_ENCODER_SHA256 = "e2d96d96f7c0eb3c6ac13fdcf8ddd664d7bc18916156ffaff09c285327d93ee0"
 LANGUAGE_INDEX = 1
@@ -62,19 +65,17 @@ class BuildResult:
 
 
 class ToneSlapperEngine:
-    def __init__(self) -> None:
-        self.base_image = asset_path(BASE_FILENAME)
+    def __init__(self, *, base_image: Path | None = None) -> None:
+        self.base_image = (
+            base_image.resolve()
+            if base_image is not None
+            else (portable_root() / BASE_FILENAME).resolve()
+        )
+        self.oem_store = OemStore(self.base_image)
         self.ffmpeg = asset_path("ffmpeg.exe")
         self.lzma_encoder = asset_path("LzmaAlone.exe")
-        self._verify_asset(self.base_image, BASE_SHA256, "OEM recovery image")
         self._verify_asset(self.ffmpeg, FFMPEG_SHA256, "FFmpeg")
         self._verify_asset(self.lzma_encoder, LZMA_ENCODER_SHA256, "LZMA encoder")
-        base_validation = validate_container(self.base_image)
-        if not base_validation.valid:
-            raise ValueError(f"bundled OEM recovery image failed validation: {base_validation.errors}")
-        self.recovery_packet_count = build_dry_run(
-            self.base_image.read_bytes(), language=LANGUAGE_INDEX
-        ).packet_count
 
     @staticmethod
     def _verify_asset(path: Path, expected_sha256: str, label: str) -> None:
@@ -89,28 +90,47 @@ class ToneSlapperEngine:
                 f"This operation is only supported for {TUNE_720BT_PROFILE.display_name}."
             )
 
+    def cached_oem(self) -> OemImage | None:
+        return self.oem_store.cached()
+
+    def download_official_oem(self) -> OemImage:
+        return self.oem_store.download_from_manufacturer()
+
+    def download_github_oem(self) -> OemImage:
+        return self.oem_store.download_from_github()
+
+    def import_manual_oem(self, source: Path) -> OemImage:
+        return self.oem_store.import_manual(source)
+
     def build(
         self,
         assignments: Mapping[int, Path],
         output: Path,
         *,
         profile_id: str = TUNE_720BT_PROFILE.profile_id,
+        base_image: Path | None = None,
+        expected_base_sha256: str = BASE_SHA256,
         progress: Callable[[str], None] | None = None,
         work_dir: Path | None = None,
     ) -> BuildResult:
         self._require_profile(profile_id)
+        selected_base = (base_image or self.base_image).resolve()
+        base_bytes, _base_validation = self._load_oem_for_use(
+            selected_base,
+            expected_base_sha256,
+        )
         if output.suffix.lower() != ".bin":
             raise UserFacingError("The output filename must end in .bin.")
         output = output.resolve()
-        if output == self.base_image.resolve():
+        if output == selected_base:
             raise UserFacingError(
-                "Choose another save location. The bundled OEM recovery file cannot be overwritten."
+                "Choose another save location. The verified OEM file cannot be overwritten."
             )
         replacements: dict[int, EncodedAudio] = {}
         if not assignments:
             if progress:
                 progress("Saving verified OEM container")
-            shutil.copyfile(self.base_image, output)
+            output.write_bytes(base_bytes)
         else:
             if work_dir is None:
                 work_context = tempfile.TemporaryDirectory(prefix="bt-tone-slapper-build-")
@@ -121,6 +141,8 @@ class ToneSlapperEngine:
                 work_context = contextlib.nullcontext(str(work_dir))
             with work_context as temporary:
                 temporary_path = Path(temporary)
+                base_snapshot = temporary_path / BASE_FILENAME
+                base_snapshot.write_bytes(base_bytes)
                 for index, source in sorted(assignments.items()):
                     if not 0 <= index < len(PROMPT_LABELS):
                         raise ValueError(f"invalid prompt index: {index}")
@@ -135,7 +157,7 @@ class ToneSlapperEngine:
                 if progress:
                     progress("Rebuilding and signing integrity fields")
                 build_container(
-                    self.base_image,
+                    base_snapshot,
                     replacements,
                     output,
                     self.lzma_encoder,
@@ -245,38 +267,53 @@ class ToneSlapperEngine:
     def restore_oem(
         self,
         identifier: str,
+        oem_image: OemImage,
         *,
         device_profile_id: str,
         progress: Callable[[str], None] | None = None,
     ) -> tuple[UploadReport, Path]:
         self._require_profile(device_profile_id)
-        image = self.base_image.read_bytes()
-        actual_sha256 = hashlib.sha256(image).hexdigest()
-        if actual_sha256 != BASE_SHA256:
-            raise UserFacingError(
-                "The bundled OEM recovery file is damaged. Reinstall or extract a fresh copy of the app."
-            )
-        try:
-            validation = validate_container_bytes(image, source=self.base_image)
-        except Exception as error:
-            raise UserFacingError(
-                "The bundled OEM recovery file is damaged. "
-                "Reinstall or extract a fresh copy of the app."
-            ) from error
-        if not validation.valid:
-            raise UserFacingError(
-                "The bundled OEM recovery file is damaged. "
-                "Reinstall or extract a fresh copy of the app."
-            )
+        image, validation = self._load_oem_for_use(
+            oem_image.path,
+            oem_image.sha256,
+        )
         return self._upload(
             identifier,
-            self.base_image,
+            oem_image.path,
             image,
             "recovery",
             validation,
             device_profile_id,
             progress,
         )
+
+    @staticmethod
+    def _load_oem_for_use(
+        path: Path,
+        expected_sha256: str,
+    ) -> tuple[bytes, ValidationResult]:
+        try:
+            image = path.read_bytes()
+        except OSError as error:
+            raise UserFacingError(
+                "The verified OEM file is no longer available. Download it again."
+            ) from error
+        actual_sha256 = hashlib.sha256(image).hexdigest()
+        if actual_sha256 != expected_sha256 or actual_sha256 != BASE_SHA256:
+            raise UserFacingError(
+                "The OEM file changed after verification. Download it again before continuing."
+            )
+        try:
+            validation = validate_container_bytes(image, source=path)
+        except Exception as error:
+            raise UserFacingError(
+                "The verified OEM file is no longer a valid prompt container."
+            ) from error
+        if not validation.valid:
+            raise UserFacingError(
+                "The verified OEM file is no longer a valid prompt container."
+            )
+        return image, validation
 
     def _upload(
         self,
