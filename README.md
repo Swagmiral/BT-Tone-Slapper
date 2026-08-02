@@ -60,4 +60,4 @@ The tests automatically locate the project root from their location under `tests
 - `requirements-build.txt` — pinned build dependencies
 - `build_portable.cmd` and `build_portable.ps1` — reproducible Windows build scripts
 
-Generated builds, virtual environments, caches, temporary files, samples, and runtime logs are not included in this repository.
+Virtual environments, caches, temporary files, and runtime logs are not included in this repository.
