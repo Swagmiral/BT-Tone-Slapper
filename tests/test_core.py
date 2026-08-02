@@ -48,7 +48,8 @@ OEM_SAMPLE = (
 CUSTOM_SOUND_PACK = (
     ROOT
     / "Custom Sound Packs"
-    / "Sound Pack 2"
+    / "JBL"
+    / TUNE_720BT_PROFILE.display_name
     / "JBL_prompts_custom.bin"
 )
 

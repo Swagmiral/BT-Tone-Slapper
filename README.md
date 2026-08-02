@@ -27,9 +27,14 @@ OEM Backups\JBL Tune 720BT\English_prompt_v0.0.5.bin
 This repository folder is only the fallback source. Runtime downloads remain directly
 beside the portable EXE.
 
-Ready-to-upload user-created packs are stored under `Custom Sound Packs/`. Each pack
-contains its compatible BIN and a human-readable README listing its target devices,
-customized prompts, validation details, and hash.
+Ready-to-upload user-created packs are grouped by manufacturer and device model:
+
+```text
+Custom Sound Packs\JBL\JBL Tune 720BT\JBL_prompts_custom.bin
+```
+
+Each device folder contains its compatible BIN and a human-readable README listing
+the customized prompts, validation details, and hash.
 
 ## Build
 

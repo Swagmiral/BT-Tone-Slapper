@@ -1,4 +1,4 @@
-# Sound Pack 2
+# JBL Tune 720BT Custom Sound Pack
 
 Ready-to-upload custom prompt container for BT Tone Slapper.
 
