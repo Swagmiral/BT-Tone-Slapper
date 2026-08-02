@@ -84,6 +84,18 @@ class CoreTests(unittest.TestCase):
             root.update_idletasks()
 
             self.assertEqual(window.prompt_empty_label.cget("text"), "Select a device first")
+            self.assertEqual(str(window.prompt_empty_label.cget("anchor")), "center")
+            self.assertEqual(str(window.prompt_empty_label.cget("justify")), "center")
+            prompt_empty_font = str(
+                window.root.tk.call(
+                    "ttk::style",
+                    "lookup",
+                    "PromptEmpty.TLabel",
+                    "-font",
+                )
+            )
+            self.assertIn("22", prompt_empty_font)
+            self.assertIn("bold", prompt_empty_font)
             self.assertTrue(window.prompt_empty_label.winfo_manager())
             self.assertFalse(window.prompt_tree.winfo_manager())
             self.assertEqual(window.prompt_tree.get_children(), ())

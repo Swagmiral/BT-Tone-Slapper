@@ -175,6 +175,8 @@ class ToneSlapperWindow:
             self.prompt_table,
             text="Select a device first",
             style="PromptEmpty.TLabel",
+            anchor="center",
+            justify="center",
         )
         self.prompt_tree = ttk.Treeview(
             self.prompt_table,
