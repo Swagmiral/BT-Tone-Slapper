@@ -175,6 +175,7 @@ class ToneSlapperWindow:
             self.prompt_table,
             text="Select a device first",
             style="PromptEmpty.TLabel",
+            font=("Segoe UI", 22, "bold"),
             anchor="center",
             justify="center",
         )
