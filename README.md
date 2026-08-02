@@ -1,6 +1,6 @@
 # BT Tone Slapper
 
-Portable Windows application for replacing event sounds on supported Bluetooth audio devices. The current release supports JBL Tune 720BT English voice-prompt containers.
+Portable Windows application for replacing event sounds on supported Bluetooth audio devices. The current release supports JBL Tune 720BT.
 
 The prebuilt portable application is available at `dist/BTToneSlapper.exe`.
 
@@ -12,7 +12,6 @@ The prebuilt portable application is available at `dist/BTToneSlapper.exe`.
 - Uploads through the verified JBL BLE service after explicit user confirmation.
 - Downloads and verifies the OEM English recovery container before every restore.
 - Falls back to the pinned OEM copy in this GitHub repository when the manufacturer download fails.
-- Restricts device selection and upload to the JBL Tune 720BT profile.
 - Produces a single portable EXE with no dependencies on the destination PC.
 
 The OEM file is saved beside the EXE after successful verification. Build reuses that
