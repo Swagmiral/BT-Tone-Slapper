@@ -24,6 +24,7 @@ if ($LASTEXITCODE -ne 0) {
     --onefile `
     --windowed `
     --name BTToneSlapper `
+    --icon "$Root\assets\icons\app_icon.ico" `
     --paths "$Root" `
     --hidden-import ctypes.wintypes `
     --collect-all bleak `

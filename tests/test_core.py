@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import asyncio
+import struct
 import sys
 import unittest
 from pathlib import Path
@@ -203,6 +204,33 @@ class CoreTests(unittest.TestCase):
         engine = test_engine()
         self.assertEqual(hashlib.sha256(engine.base_image.read_bytes()).hexdigest(), BASE_SHA256)
         self.assertTrue(validate_container(engine.base_image).valid)
+        icon_png = ROOT / "assets" / "source" / "app_icon.png"
+        icon_ico = ROOT / "assets" / "icons" / "app_icon.ico"
+        self.assertTrue(icon_png.is_file())
+        icon_data = icon_ico.read_bytes()
+        reserved, image_type, image_count = struct.unpack_from("<HHH", icon_data)
+        self.assertEqual((reserved, image_type, image_count), (0, 1, 9))
+        icon_sizes = {
+            (
+                icon_data[6 + index * 16] or 256,
+                icon_data[7 + index * 16] or 256,
+            )
+            for index in range(image_count)
+        }
+        self.assertEqual(
+            icon_sizes,
+            {
+                (16, 16),
+                (20, 20),
+                (24, 24),
+                (32, 32),
+                (40, 40),
+                (48, 48),
+                (64, 64),
+                (128, 128),
+                (256, 256),
+            },
+        )
 
     def test_oem_packet_plan(self) -> None:
         payload = OEM_SAMPLE.read_bytes()

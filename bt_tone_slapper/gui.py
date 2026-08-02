@@ -88,6 +88,9 @@ class ToneSlapperWindow:
         self.root.geometry("820x720")
         self.root.minsize(680, 700)
         apply_dark_theme(self.root)
+        app_icon = str(asset_path("icons/app_icon.ico"))
+        self.root.iconbitmap(app_icon)
+        self.root.iconbitmap(default=app_icon)
         self.engine = ToneSlapperEngine()
         self.assignments: dict[int, Path] = {}
         self.devices: dict[str, str] = {}
