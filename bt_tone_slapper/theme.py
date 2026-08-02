@@ -87,6 +87,13 @@ def apply_dark_theme(root: Tk) -> ttk.Style:
         borderwidth=0,
     )
     style.configure(
+        "PromptEmpty.TLabel",
+        background=COLORS["prompt_surface"],
+        foreground=COLORS["muted"],
+        font=("Segoe UI Variable Display", 18, "bold"),
+        anchor="center",
+    )
+    style.configure(
         "FieldShell.TFrame",
         background=COLORS["field"],
         bordercolor=COLORS["border"],

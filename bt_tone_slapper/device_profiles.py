@@ -9,6 +9,22 @@ class DeviceProfile:
     display_name: str
     pid: str
     name_marker: str
+    prompt_labels: tuple[str, ...]
+
+
+TUNE_720BT_PROMPT_LABELS = (
+    "Power on",
+    "Power off",
+    "Connected",
+    "Pairing",
+    "Battery is low",
+    "Mute on",
+    "Mute off",
+    "Incoming call",
+    "Voice prompt off",
+    "Voice prompt on",
+    "Maximum volume",
+)
 
 
 TUNE_720BT_PROFILE = DeviceProfile(
@@ -16,6 +32,7 @@ TUNE_720BT_PROFILE = DeviceProfile(
     display_name="JBL Tune 720BT",
     pid="20b4",
     name_marker="jbltune720bt",
+    prompt_labels=TUNE_720BT_PROMPT_LABELS,
 )
 SUPPORTED_PROFILES = (TUNE_720BT_PROFILE,)
 

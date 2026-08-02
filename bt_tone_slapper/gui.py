@@ -28,6 +28,7 @@ from . import APP_AUTHOR, APP_NAME, APP_VERSION, LICENSE_NAME, PROJECT_URL
 from .device_profiles import (
     SUPPORTED_PROFILES,
     TUNE_720BT_PROFILE,
+    get_device_profile,
     resolve_device_profile,
 )
 from .errors import user_error_message
@@ -35,7 +36,7 @@ from .oem import OEM_GITHUB_MANUAL_URL, OemImage
 from .resources import asset_path
 from .theme import COLORS, apply_dark_theme, apply_dark_title_bar
 from .widgets import ProgressButton, ResetButton
-from .workflow import BASE_SHA256, PROMPT_LABELS, BuildResult, ToneSlapperEngine
+from .workflow import BASE_SHA256, BuildResult, ToneSlapperEngine
 
 
 AUDIO_TYPES = [
@@ -168,10 +169,15 @@ class ToneSlapperWindow:
         )
         self.prompt_card = ttk.Frame(content, style="PromptCard.TFrame")
         self.prompt_card.pack(fill=BOTH, expand=True, pady=(0, 14))
-        prompt_table = ttk.Frame(self.prompt_card, style="PromptBody.TFrame")
-        prompt_table.pack(fill=BOTH, expand=True)
+        self.prompt_table = ttk.Frame(self.prompt_card, style="PromptBody.TFrame")
+        self.prompt_table.pack(fill=BOTH, expand=True)
+        self.prompt_empty_label = ttk.Label(
+            self.prompt_table,
+            text="Select a device first",
+            style="PromptEmpty.TLabel",
+        )
         self.prompt_tree = ttk.Treeview(
-            prompt_table,
+            self.prompt_table,
             columns=("index", "event", "source", "reset"),
             show="headings",
             height=11,
@@ -190,12 +196,11 @@ class ToneSlapperWindow:
         self.prompt_tree.tag_configure("custom", foreground="#ffad98")
         self.prompt_tree.tag_configure("hover", background=COLORS["surface_hover"])
         self.prompt_scrollbar = ttk.Scrollbar(
-            prompt_table,
+            self.prompt_table,
             orient="vertical",
             command=self.prompt_tree.yview,
         )
         self.prompt_tree.configure(yscrollcommand=self._prompt_scroll_changed)
-        self.prompt_tree.pack(side=LEFT, fill=BOTH, expand=True)
         self._tree_font = font.Font(root=self.root, family="Segoe UI", size=9)
         self.prompt_tree.bind("<Button-1>", self._prompt_click)
         self.prompt_tree.bind("<Double-1>", self._block_column_resize)
@@ -214,6 +219,7 @@ class ToneSlapperWindow:
             takefocus=False,
         )
         self.validate_button.pack(fill=X, pady=(0, 6))
+        self.validate_button.bind("<Button-1>", self._open_button_pressed, add="+")
         self.build_button = ttk.Button(
             action_controls,
             text=self.BUILD_TEXT,
@@ -378,6 +384,12 @@ class ToneSlapperWindow:
             return "break"
         return None
 
+    def _open_button_pressed(self, _event=None):
+        if not self.busy and self.target_profile_id is None:
+            self._show_flying_tip(self.validate_button, "select target device")
+            return "break"
+        return None
+
     def _upload_button_pressed(self, _event=None):
         if self.busy:
             return "break"
@@ -513,7 +525,20 @@ class ToneSlapperWindow:
             label.destroy()
         self._source_labels.clear()
         self.prompt_tree.delete(*self.prompt_tree.get_children())
-        for index, label in enumerate(PROMPT_LABELS):
+        prompt_labels = self._prompt_labels()
+        if not prompt_labels:
+            if self.prompt_tree.winfo_manager():
+                self.prompt_tree.pack_forget()
+            if self.prompt_scrollbar.winfo_manager():
+                self.prompt_scrollbar.pack_forget()
+            if not self.prompt_empty_label.winfo_manager():
+                self.prompt_empty_label.pack(fill=BOTH, expand=True)
+            return
+        if self.prompt_empty_label.winfo_manager():
+            self.prompt_empty_label.pack_forget()
+        if not self.prompt_tree.winfo_manager():
+            self.prompt_tree.pack(side=LEFT, fill=BOTH, expand=True)
+        for index, label in enumerate(prompt_labels):
             custom = index in self.assignments
             self.prompt_tree.insert(
                 "",
@@ -532,7 +557,7 @@ class ToneSlapperWindow:
         return f"{'Custom' if custom else 'OEM'}Source{'Hover' if hovered else ''}.TLabel"
 
     def _position_row_controls(self) -> None:
-        if not self.prompt_tree.winfo_exists():
+        if not self.prompt_tree.winfo_exists() or not self.prompt_tree.winfo_manager():
             return
         for button in self._reset_buttons.values():
             button.destroy()
@@ -540,7 +565,7 @@ class ToneSlapperWindow:
         for label in self._source_labels.values():
             label.destroy()
         self._source_labels.clear()
-        for index in range(len(PROMPT_LABELS)):
+        for index in range(len(self._prompt_labels())):
             source_bounds = self.prompt_tree.bbox(str(index), "source")
             if not source_bounds:
                 continue
@@ -597,7 +622,7 @@ class ToneSlapperWindow:
             self._reset_buttons[index] = button
 
     def _source_click(self, index: int):
-        if not self.busy:
+        if not self.busy and self.target_profile_id is not None:
             self._choose_audio_for(index)
         return "break"
 
@@ -666,8 +691,11 @@ class ToneSlapperWindow:
                 reset_button.set_row_hover(prompt_index == index)
 
     def _choose_audio_for(self, index: int) -> None:
+        prompt_labels = self._prompt_labels()
+        if not 0 <= index < len(prompt_labels):
+            return
         selected = filedialog.askopenfilename(
-            title=f"Audio for {PROMPT_LABELS[index]}",
+            title=f"Audio for {prompt_labels[index]}",
             filetypes=AUDIO_TYPES,
         )
         if selected:
@@ -702,6 +730,7 @@ class ToneSlapperWindow:
             self._update_buttons()
             return
         if profile.profile_id != self.target_profile_id:
+            self.assignments.clear()
             self.target_profile_id = profile.profile_id
             self.target_model = profile.display_name
             self.target_var.set(f"Build target: {profile.display_name}")
@@ -712,9 +741,14 @@ class ToneSlapperWindow:
                     pady=(1, 8),
                     before=self.prompt_card,
                 )
+            self._refresh_prompt_rows()
             self._invalidate_build()
             return
         self._update_buttons()
+
+    def _prompt_labels(self) -> tuple[str, ...]:
+        profile = get_device_profile(self.target_profile_id)
+        return profile.prompt_labels if profile is not None else ()
 
     def _clear_device_text_selection(self, _event=None) -> None:
         self.root.after_idle(self.device_combo.selection_clear)
@@ -1131,13 +1165,16 @@ class ToneSlapperWindow:
             self._update_buttons()
 
     def open_existing(self) -> None:
+        profile_id = self.target_profile_id
+        if profile_id is None:
+            self._show_flying_tip(self.validate_button, "select target device")
+            return
         selected = filedialog.askopenfilename(
             filetypes=[("Tone container", "*.bin"), ("All files", "*.*")]
         )
         if not selected:
             return
         path = Path(selected)
-        profile_id = self.target_profile_id or TUNE_720BT_PROFILE.profile_id
         self._invalidate_build()
         self._run_background(
             "open",
@@ -1288,7 +1325,8 @@ class ToneSlapperWindow:
             state="normal" if build_enabled else "disabled",
             style="Accent.TButton" if build_enabled and self.build_dirty else "TButton",
         )
-        self.validate_button.configure(state=normal_state)
+        open_enabled = not self.busy and self.target_profile_id is not None
+        self.validate_button.configure(state="normal" if open_enabled else "disabled")
         selected_profile_id = self._selected_profile_id()
         has_device = (
             self._device_identifier() is not None and selected_profile_id is not None

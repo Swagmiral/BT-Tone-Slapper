@@ -6,6 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from tkinter import Tk
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -35,7 +36,7 @@ from bt_tone_slapper.oem import (
     OemStore,
 )
 from bt_tone_slapper.uploader import build_dry_run
-from bt_tone_slapper.workflow import BASE_SHA256, PROMPT_LABELS, ToneSlapperEngine
+from bt_tone_slapper.workflow import BASE_SHA256, ToneSlapperEngine
 
 
 ROOT = PROJECT_ROOT
@@ -75,6 +76,36 @@ def test_engine() -> ToneSlapperEngine:
 
 
 class CoreTests(unittest.TestCase):
+    def test_prompt_list_waits_for_device_target(self) -> None:
+        root = Tk()
+        root.withdraw()
+        try:
+            window = ToneSlapperWindow(root)
+            root.update_idletasks()
+
+            self.assertEqual(window.prompt_empty_label.cget("text"), "Select a device first")
+            self.assertTrue(window.prompt_empty_label.winfo_manager())
+            self.assertFalse(window.prompt_tree.winfo_manager())
+            self.assertEqual(window.prompt_tree.get_children(), ())
+            self.assertEqual(str(window.validate_button.cget("state")), "disabled")
+            with patch("bt_tone_slapper.gui.filedialog.askopenfilename") as choose:
+                window._choose_audio_for(0)
+            choose.assert_not_called()
+
+            window.target_profile_id = TUNE_720BT_PROFILE.profile_id
+            window._refresh_prompt_rows()
+            root.update_idletasks()
+
+            self.assertFalse(window.prompt_empty_label.winfo_manager())
+            self.assertTrue(window.prompt_tree.winfo_manager())
+            self.assertEqual(len(window.prompt_tree.get_children()), 11)
+            self.assertEqual(
+                window.prompt_tree.item("10", "values")[1],
+                "Maximum volume",
+            )
+        finally:
+            root.destroy()
+
     def test_runtime_assets_and_oem_fixture(self) -> None:
         engine = test_engine()
         self.assertEqual(hashlib.sha256(engine.base_image.read_bytes()).hexdigest(), BASE_SHA256)
@@ -177,8 +208,8 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(success.__func__, ToneSlapperWindow._oem_acquired)
 
     def test_prompt_map_and_live_uuids(self) -> None:
-        self.assertEqual(len(PROMPT_LABELS), 11)
-        self.assertEqual(PROMPT_LABELS[10], "Maximum volume")
+        self.assertEqual(len(TUNE_720BT_PROFILE.prompt_labels), 11)
+        self.assertEqual(TUNE_720BT_PROFILE.prompt_labels[10], "Maximum volume")
         self.assertEqual(SERVICE_UUID, "65786365-6c70-6f69-6e74-2e636f6d0000")
         self.assertTrue(NOTIFY_UUID.endswith("0001"))
         self.assertTrue(WRITE_UUID.endswith("0002"))

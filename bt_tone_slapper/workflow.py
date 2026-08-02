@@ -20,6 +20,7 @@ from .container import (
     validate_container_bytes,
 )
 from .device_profiles import (
+    DeviceProfile,
     TUNE_720BT_PROFILE,
     get_device_profile,
     resolve_device_profile,
@@ -38,21 +39,6 @@ from .uploader import UploadError, UploadReport, build_dry_run, run_upload
 FFMPEG_SHA256 = "2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3"
 LZMA_ENCODER_SHA256 = "e2d96d96f7c0eb3c6ac13fdcf8ddd664d7bc18916156ffaff09c285327d93ee0"
 LANGUAGE_INDEX = 1
-
-PROMPT_LABELS = (
-    "Power on",
-    "Power off",
-    "Connected",
-    "Pairing",
-    "Battery is low",
-    "Mute on",
-    "Mute off",
-    "Incoming call",
-    "Voice prompt off",
-    "Voice prompt on",
-    "Maximum volume",
-)
-
 
 @dataclass(frozen=True)
 class BuildResult:
@@ -84,11 +70,13 @@ class ToneSlapperEngine:
             raise ValueError(f"bundled {label} hash mismatch: {actual}")
 
     @staticmethod
-    def _require_profile(profile_id: str) -> None:
-        if get_device_profile(profile_id) is None:
+    def _require_profile(profile_id: str) -> DeviceProfile:
+        profile = get_device_profile(profile_id)
+        if profile is None:
             raise UserFacingError(
                 f"This operation is only supported for {TUNE_720BT_PROFILE.display_name}."
             )
+        return profile
 
     def cached_oem(self) -> OemImage | None:
         return self.oem_store.cached()
@@ -113,7 +101,8 @@ class ToneSlapperEngine:
         progress: Callable[[str], None] | None = None,
         work_dir: Path | None = None,
     ) -> BuildResult:
-        self._require_profile(profile_id)
+        profile = self._require_profile(profile_id)
+        prompt_labels = profile.prompt_labels
         selected_base = (base_image or self.base_image).resolve()
         base_bytes, _base_validation = self._load_oem_for_use(
             selected_base,
@@ -144,10 +133,10 @@ class ToneSlapperEngine:
                 base_snapshot = temporary_path / BASE_FILENAME
                 base_snapshot.write_bytes(base_bytes)
                 for index, source in sorted(assignments.items()):
-                    if not 0 <= index < len(PROMPT_LABELS):
+                    if not 0 <= index < len(prompt_labels):
                         raise ValueError(f"invalid prompt index: {index}")
                     if progress:
-                        progress(f"Converting prompt {index}: {PROMPT_LABELS[index]}")
+                        progress(f"Converting prompt {index}: {prompt_labels[index]}")
                     replacements[index] = encode_audio(
                         source,
                         temporary_path / f"prompt_{index:02d}",
