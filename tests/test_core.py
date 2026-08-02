@@ -45,6 +45,12 @@ OEM_SAMPLE = (
     / TUNE_720BT_PROFILE.display_name
     / "English_prompt_v0.0.5.bin"
 )
+CUSTOM_SOUND_PACK = (
+    ROOT
+    / "Custom Sound Packs"
+    / "Sound Pack 2"
+    / "JBL_prompts_custom.bin"
+)
 
 
 class FakeDownloadResponse:
@@ -79,6 +85,20 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(report.packet_count, 372)
         self.assertEqual(report.data_packet_count, 370)
         self.assertEqual(report.chunk_size, 201)
+
+    def test_repository_custom_sound_pack(self) -> None:
+        result = test_engine().open_existing(
+            CUSTOM_SOUND_PACK,
+            profile_id=TUNE_720BT_PROFILE.profile_id,
+        )
+        self.assertTrue(result.validation.valid)
+        self.assertEqual(
+            result.sha256,
+            "d745198f6a9b5041b63b4a6a18f73e05df18265bdf7505706bfb3036f49f2831",
+        )
+        self.assertEqual(result.validation.file_size, 88740)
+        self.assertEqual(result.dry_run["packet_count"], 444)
+        self.assertEqual(result.dry_run["data_packet_count"], 442)
 
     def test_official_oem_download_replaces_invalid_cache(self) -> None:
         payload = OEM_SAMPLE.read_bytes()
