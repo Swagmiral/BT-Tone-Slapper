@@ -24,7 +24,7 @@ from tkinter import (
 )
 from tkinter import ttk
 
-from . import APP_NAME, APP_VERSION
+from . import APP_AUTHOR, APP_NAME, APP_VERSION, LICENSE_NAME, PROJECT_URL
 from .device_profiles import (
     SUPPORTED_PROFILES,
     TUNE_720BT_PROFILE,
@@ -320,6 +320,12 @@ class ToneSlapperWindow:
             (
                 "Currently supported devices",
                 ", ".join(SUPPORTED_DEVICES),
+            ),
+            (
+                "About and license",
+                f"Originally created by {APP_AUTHOR}\n"
+                f"Original project: {PROJECT_URL}\n"
+                f"License: {LICENSE_NAME}",
             ),
         )
         for heading, body in sections:

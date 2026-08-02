@@ -58,6 +58,21 @@ Get-Content .\self-test.json
 
 The tests automatically locate the project root from their location under `tests/`, so the repository can be moved or cloned to any directory without changing test paths. They are development files and are not imported by the application or bundled into the portable EXE.
 
+## Author and License
+
+BT Tone Slapper was originally created by Yaroslav Tselovanskyi (Swagmiral).
+Original project: <https://github.com/Swagmiral/BT-Tone-Slapper>
+
+The original project source is licensed under the GNU General Public License
+version 3 only, supplemented by the attribution requirements in
+[`ATTRIBUTION.md`](ATTRIBUTION.md). Public forks must preserve the original
+author notice in their primary README, and distributed interactive builds must
+keep the attribution accessible in the application interface.
+
+OEM files and other third-party components are excluded from the project
+license and remain under their respective terms described in
+[`THIRD_PARTY.md`](THIRD_PARTY.md).
+
 ## Source Layout
 
 - `app.py` — application entry point and packaged-runtime self-test

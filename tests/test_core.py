@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, Mock, patch
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from bt_tone_slapper import APP_AUTHOR, LICENSE_NAME, PROJECT_URL
 from bt_tone_slapper.bluetooth import DiscoveredDevice, scan_devices
 from bt_tone_slapper.container import build_container, validate_container
 from bt_tone_slapper.device_profiles import (
@@ -430,6 +431,12 @@ class CoreTests(unittest.TestCase):
 
     def test_help_formats_and_support_link(self) -> None:
         self.assertEqual(DONATE_URL, "https://donatello.to/polymernyk")
+        self.assertEqual(APP_AUTHOR, "Yaroslav Tselovanskyi (Swagmiral)")
+        self.assertEqual(PROJECT_URL, "https://github.com/Swagmiral/BT-Tone-Slapper")
+        self.assertEqual(
+            LICENSE_NAME,
+            "GNU GPLv3 with Section 7 attribution terms",
+        )
         self.assertEqual(SUPPORTED_DEVICES, ("JBL Tune 720BT",))
         self.assertEqual(
             SUPPORTED_AUDIO_FORMATS,
@@ -452,6 +459,20 @@ class CoreTests(unittest.TestCase):
         with patch("bt_tone_slapper.gui.webbrowser.open", return_value=True) as open_url:
             window.donate()
         open_url.assert_called_once_with(DONATE_URL, new=2)
+
+    def test_project_license_and_attribution_notices(self) -> None:
+        license_text = (PROJECT_ROOT / "LICENSE").read_text(encoding="utf-8")
+        attribution_text = (PROJECT_ROOT / "ATTRIBUTION.md").read_text(encoding="utf-8")
+        readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+        notice = (
+            "BT Tone Slapper was originally created by "
+            "Yaroslav Tselovanskyi (Swagmiral)."
+        )
+        self.assertIn("GNU GENERAL PUBLIC LICENSE", license_text)
+        self.assertIn("Version 3, 29 June 2007", license_text)
+        self.assertIn(notice, attribution_text)
+        self.assertIn(notice, readme_text)
+        self.assertIn(PROJECT_URL, attribution_text)
 
     def test_scan_merges_remembered_ble_devices(self) -> None:
         class FakeScanner:
