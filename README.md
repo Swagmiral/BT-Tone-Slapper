@@ -1,6 +1,6 @@
-# JBL Tone Studio
+# BT Tone Slapper
 
-Portable Windows application for creating, validating, uploading, and recovering JBL Tune 720BT English voice-prompt containers.
+Portable Windows application for replacing event sounds on supported Bluetooth audio devices. The current release supports JBL Tune 720BT English voice-prompt containers.
 
 ## Features
 
@@ -29,7 +29,7 @@ Run:
 The script creates an isolated local build environment and writes:
 
 ```text
-dist\JBLToneStudio.exe
+dist\BTToneSlapper.exe
 ```
 
 Python, Bleak, WinRT bindings, FFmpeg, the LZMA encoder, icons, and the OEM recovery container are bundled into the EXE. The destination PC does not need Python or additional packages.
@@ -37,7 +37,7 @@ Python, Bleak, WinRT bindings, FFmpeg, the LZMA encoder, icons, and the OEM reco
 ## Verify The EXE
 
 ```powershell
-.\dist\JBLToneStudio.exe --self-test .\self-test.json
+.\dist\BTToneSlapper.exe --self-test .\self-test.json
 Get-Content .\self-test.json
 ```
 
@@ -52,7 +52,7 @@ The tests automatically locate the project root from their location under `tests
 ## Source Layout
 
 - `app.py` — application entry point and packaged-runtime self-test
-- `tone_studio/` — application source
+- `bt_tone_slapper/` — application source
 - `tests/` — development test suite
 - `assets/` — required runtime binaries, recovery container, and icons
 - `requirements-build.txt` — pinned build dependencies

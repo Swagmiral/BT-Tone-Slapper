@@ -1,0 +1,9 @@
+/.venv/
+/build/
+/dist/
+/*.spec
+/.pytest_cache/
+/__pycache__/
+/**/__pycache__/
+*.py[cod]
+/self-test*.json

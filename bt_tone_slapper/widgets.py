@@ -29,6 +29,7 @@ class ProgressButton(Canvas):
         self._command = command
         self._enabled = True
         self._busy = False
+        self._complete = False
         self._hovered = False
         self._progress = 0.0
         self.bind("<Configure>", lambda _: self._draw())
@@ -45,13 +46,16 @@ class ProgressButton(Canvas):
         self._draw()
 
     def _click(self, _event) -> None:
-        if self._enabled and not self._busy:
+        if self._enabled and not self._busy and not self._complete:
             self._command()
 
     def _draw(self) -> None:
         width = max(1, self.winfo_width())
         height = max(1, self.winfo_height())
-        if self._busy:
+        if self._complete:
+            base = COLORS["success"]
+            foreground = "#ffffff"
+        elif self._busy:
             base = COLORS["surface_hover"]
             foreground = "#ffffff"
         elif not self._enabled:
@@ -76,14 +80,6 @@ class ProgressButton(Canvas):
                 fill=COLORS["accent"],
                 outline="",
             )
-        self.create_rectangle(
-            0.5,
-            0.5,
-            width - 0.5,
-            height - 0.5,
-            outline=COLORS["accent"] if self._enabled or self._busy else COLORS["border"],
-            width=1,
-        )
         self.create_text(
             width / 2,
             height / 2,
@@ -91,26 +87,40 @@ class ProgressButton(Canvas):
             fill=foreground,
             font=("Segoe UI Semibold", 9),
         )
-        self.configure(cursor="hand2" if self._enabled and not self._busy else "arrow")
+        self.configure(
+            cursor="hand2"
+            if self._enabled and not self._busy and not self._complete
+            else "arrow"
+        )
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
         self._draw()
 
     def begin(self, text: str) -> None:
+        self._complete = False
         self._busy = True
         self._progress = 0.02
         self._text = text
         self._draw()
 
     def set_progress(self, fraction: float, text: str) -> None:
+        self._complete = False
         self._busy = True
         self._progress = min(1.0, max(0.0, fraction))
         self._text = text
         self._draw()
 
+    def complete(self, text: str = "Success!") -> None:
+        self._busy = False
+        self._complete = True
+        self._progress = 1.0
+        self._text = text
+        self._draw()
+
     def reset(self, *, enabled: bool) -> None:
         self._busy = False
+        self._complete = False
         self._progress = 0.0
         self._text = self._default_text
         self._enabled = enabled

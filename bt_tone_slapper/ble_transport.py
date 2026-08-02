@@ -51,7 +51,7 @@ class BleakUploadTransport:
         if not inspection.protocol_ready:
             await self.client.disconnect()
             raise UploadConnectionError(
-                "The selected device does not support JBL Tone Studio uploads."
+                "The selected device does not support BT Tone Slapper uploads."
             )
         negotiated_mtu = int(self.client.mtu_size)
         if negotiated_mtu < self.mtu:

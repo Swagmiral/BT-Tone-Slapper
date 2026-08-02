@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 import traceback
 import webbrowser
 from pathlib import Path
 from tkinter import (
     BOTH,
+    Canvas,
     LEFT,
     RIGHT,
     X,
@@ -14,6 +16,7 @@ from tkinter import (
     StringVar,
     Tk,
     Toplevel,
+    PhotoImage,
     filedialog,
     font,
     messagebox,
@@ -27,9 +30,10 @@ from .device_profiles import (
     resolve_device_profile,
 )
 from .errors import user_error_message
+from .resources import asset_path
 from .theme import COLORS, apply_dark_theme, apply_dark_title_bar
 from .widgets import ProgressButton, ResetButton
-from .workflow import BASE_SHA256, PROMPT_LABELS, BuildResult, StudioEngine
+from .workflow import BASE_SHA256, PROMPT_LABELS, BuildResult, ToneSlapperEngine
 
 
 AUDIO_TYPES = [
@@ -60,12 +64,14 @@ SUPPORTED_AUDIO_FORMATS = (
 SUPPORTED_DEVICES = tuple(profile.display_name for profile in SUPPORTED_PROFILES)
 
 
-class StudioWindow:
+class ToneSlapperWindow:
     SCAN_TEXT = "Scan for devices"
     BUILD_TEXT = "Build"
     OPEN_TEXT = "Open existing…"
     UPLOAD_TEXT = "Upload"
     BUILD_SUCCESS_MS = 3000
+    UPLOAD_FINISH_MS = 6000
+    UPLOAD_FINISH_INTERVAL_MS = 50
 
     def __init__(self, root: Tk) -> None:
         self.root = root
@@ -73,7 +79,7 @@ class StudioWindow:
         self.root.geometry("820x720")
         self.root.minsize(680, 700)
         apply_dark_theme(self.root)
-        self.engine = StudioEngine()
+        self.engine = ToneSlapperEngine()
         self.assignments: dict[int, Path] = {}
         self.devices: dict[str, str] = {}
         self.device_models: dict[str, str] = {}
@@ -86,10 +92,25 @@ class StudioWindow:
         self.active_total_packets = 0
         self._prompt_refresh_job: str | None = None
         self._build_status_job: str | None = None
+        self._upload_finish_job: str | None = None
+        self._upload_success_latched = False
+        self._tip_job: str | None = None
+        self._tip_canvas: Canvas | None = None
+        self._tip_font = font.Font(
+            root=self.root,
+            family="Segoe UI Semibold",
+            size=10,
+        )
         self._hovered_prompt: int | None = None
         self._help_window: Toplevel | None = None
         self._reset_buttons: dict[int, ResetButton] = {}
         self._source_labels: dict[int, ttk.Label] = {}
+        self._help_icon = PhotoImage(
+            file=str(asset_path("icons/material_help_outline_white_18.png"))
+        )
+        self._support_icon = PhotoImage(
+            file=str(asset_path("icons/material_favorite_white_18.png"))
+        )
 
         self.device_var = StringVar()
         self.target_var = StringVar()
@@ -196,12 +217,14 @@ class StudioWindow:
             takefocus=False,
         )
         self.build_button.pack(fill=X)
+        self.build_button.bind("<Button-1>", self._build_button_pressed, add="+")
         self.upload_button = ProgressButton(
             action_controls,
             text=self.UPLOAD_TEXT,
             command=self.upload,
         )
         self.upload_button.pack(fill=X, pady=(8, 0))
+        self.upload_button.bind("<Button-1>", self._upload_button_pressed, add="+")
         self.recovery_button = ttk.Button(
             action_controls,
             text="Restore OEM English",
@@ -210,12 +233,15 @@ class StudioWindow:
             takefocus=False,
         )
         self.recovery_button.pack(fill=X, pady=(8, 0))
+        self.recovery_button.bind("<Button-1>", self._recovery_button_pressed, add="+")
 
         utility_footer = ttk.Frame(content)
         utility_footer.pack(fill=X, padx=14)
         self.help_button = ttk.Button(
             utility_footer,
             text="Help",
+            image=self._help_icon,
+            compound=LEFT,
             style="UtilityLink.TButton",
             command=self.show_help,
             takefocus=False,
@@ -224,6 +250,8 @@ class StudioWindow:
         self.support_button = ttk.Button(
             utility_footer,
             text="Support development",
+            image=self._support_icon,
+            compound=LEFT,
             style="UtilityLink.TButton",
             command=self.donate,
             takefocus=False,
@@ -247,7 +275,7 @@ class StudioWindow:
 
         content = ttk.Frame(dialog, padding=(22, 18))
         content.pack(fill=BOTH, expand=True)
-        ttk.Label(content, text="How to use JBL Tone Studio", style="HelpTitle.TLabel").pack(
+        ttk.Label(content, text="How to use BT Tone Slapper", style="HelpTitle.TLabel").pack(
             anchor="w", pady=(0, 14)
         )
 
@@ -255,8 +283,9 @@ class StudioWindow:
             (
                 "1. Connect",
                 "Connect the headphones to Windows normally.\n"
-                "In this app click Scan for devices, then select the connected JBL Tune 720BT if "
-                "multiple JBL devices are connected.",
+                f"In this app click Scan for devices, then select the connected "
+                f"{TUNE_720BT_PROFILE.display_name} if "
+                "multiple supported devices are connected.",
             ),
             (
                 "2. Choose sounds",
@@ -331,6 +360,104 @@ class StudioWindow:
                 APP_NAME,
                 f"Could not open the donation page. Visit:\n\n{DONATE_URL}",
             )
+
+    def _build_button_pressed(self, _event=None):
+        if not self.busy and self.target_profile_id is None:
+            self._show_flying_tip(self.build_button, "select target device")
+            return "break"
+        return None
+
+    def _upload_button_pressed(self, _event=None):
+        if self.busy:
+            return "break"
+        if self.last_build is None:
+            self._show_flying_tip(self.upload_button, "build or open first")
+            return "break"
+        if self._device_identifier() is None or self._selected_profile_id() is None:
+            self._show_flying_tip(self.upload_button, "select connected device")
+            return "break"
+        return None
+
+    def _recovery_button_pressed(self, _event=None):
+        if self.busy:
+            return "break"
+        if self._device_identifier() is None or self._selected_profile_id() is None:
+            self._show_flying_tip(self.recovery_button, "select connected device")
+            return "break"
+        return None
+
+    def _show_flying_tip(self, anchor, text: str) -> None:
+        self._dismiss_flying_tip()
+        self.root.update_idletasks()
+
+        if self._tip_canvas is None:
+            self._tip_canvas = Canvas(
+                self.root,
+                background="#000000",
+                borderwidth=0,
+                highlightthickness=0,
+                relief="flat",
+                takefocus=False,
+            )
+            self._tip_canvas.bind("<Button-1>", lambda _event: "break")
+
+        tip = self._tip_canvas
+        width = self._tip_font.measure(text) + 16
+        height = self._tip_font.metrics("linespace") + 6
+        x = (
+            anchor.winfo_rootx()
+            - self.root.winfo_rootx()
+            + (anchor.winfo_width() - width) // 2
+        )
+        start_y = anchor.winfo_rooty() - self.root.winfo_rooty() - height + 20
+        travel = 30
+        frames = 36
+        interval_ms = 45
+
+        def blend(start: str, end: str, amount: float) -> str:
+            start_rgb = tuple(int(start[index : index + 2], 16) for index in (1, 3, 5))
+            end_rgb = tuple(int(end[index : index + 2], 16) for index in (1, 3, 5))
+            values = tuple(
+                round(start_value + (end_value - start_value) * amount)
+                for start_value, end_value in zip(start_rgb, end_rgb)
+            )
+            return "#{:02x}{:02x}{:02x}".format(*values)
+
+        def animate(frame: int = 0) -> None:
+            self._tip_job = None
+            if self._tip_canvas is not tip or not tip.winfo_exists():
+                return
+            progress = frame / frames
+            y = start_y - round(travel * progress)
+            fade_start = 0.68
+            fade_progress = max(0.0, (progress - fade_start) / (1.0 - fade_start))
+            background = blend("#000000", COLORS["window"], fade_progress)
+            foreground = blend("#ffffff", COLORS["window"], fade_progress)
+            tip.configure(background=background)
+            tip.delete("all")
+            tip.create_text(
+                width / 2,
+                height / 2,
+                text=text,
+                fill=foreground,
+                font=self._tip_font,
+            )
+            tip.place(x=x, y=y, width=width, height=height)
+            tip.tk.call("raise", tip._w)
+            if frame >= frames:
+                self._dismiss_flying_tip()
+                return
+            self._tip_job = self.root.after(interval_ms, animate, frame + 1)
+
+        animate()
+
+    def _dismiss_flying_tip(self) -> None:
+        if self._tip_job is not None:
+            self.root.after_cancel(self._tip_job)
+            self._tip_job = None
+        if self._tip_canvas is not None:
+            self._tip_canvas.place_forget()
+            self._tip_canvas.delete("all")
 
     def _schedule_prompt_refresh(self, _event=None) -> None:
         if self._prompt_refresh_job is not None:
@@ -544,6 +671,7 @@ class StudioWindow:
             self._refresh_prompt_rows()
 
     def _invalidate_build(self) -> None:
+        self._reset_upload_success()
         if self._build_status_job is not None:
             self.root.after_cancel(self._build_status_job)
             self._build_status_job = None
@@ -554,6 +682,7 @@ class StudioWindow:
         self._update_buttons()
 
     def _device_selected(self, _event=None) -> None:
+        self._reset_upload_success()
         self._clear_device_text_selection()
         display = self.device_var.get()
         model = self.device_models.get(display)
@@ -589,6 +718,7 @@ class StudioWindow:
     ) -> None:
         if self.busy:
             return
+        self._reset_upload_success()
         if operation_name == "build" and self._build_status_job is not None:
             self.root.after_cancel(self._build_status_job)
             self._build_status_job = None
@@ -624,18 +754,28 @@ class StudioWindow:
         self._reset_operation_ui()
 
     def _finish_success(self, result, callback) -> None:
+        operation_name = self.active_operation
         callback(result)
+        if operation_name in {"upload", "recovery"}:
+            return
         self._reset_operation_ui()
 
-    def _reset_operation_ui(self) -> None:
+    def _reset_operation_ui(self, *, preserve_upload_status: bool = False) -> None:
         self.busy = False
         self.active_operation = None
         self.active_total_packets = 0
         self.scan_button.configure(text=self.SCAN_TEXT)
         self.build_button.configure(text=self.BUILD_TEXT)
         self.output_var.set(self.last_build.output if self.last_build else self.OPEN_TEXT)
-        self.upload_button.reset(enabled=False)
+        if not preserve_upload_status:
+            self.upload_button.reset(enabled=False)
         self._update_buttons()
+
+    def _reset_upload_success(self) -> None:
+        if not self._upload_success_latched:
+            return
+        self._upload_success_latched = False
+        self.upload_button.reset(enabled=False)
 
     def _thread_progress(self, message: str) -> None:
         self.root.after(0, lambda: self._apply_progress(message))
@@ -668,7 +808,7 @@ class StudioWindow:
         elif message.startswith("Applying image"):
             self.upload_button.set_progress(0.96, "Applying and verifying…")
         elif message.startswith("Device accepted image"):
-            self.upload_button.set_progress(1.0, "Accepted by headphones")
+            self.upload_button.set_progress(0.96, "Finishing…")
 
     def scan(self) -> None:
         self._run_background("scan", self.engine.scan, self._scan_complete)
@@ -690,10 +830,14 @@ class StudioWindow:
         if values:
             self._device_selected()
         if not values:
-            messagebox.showinfo(APP_NAME, "No connected JBL Tune 720BT was found.")
+            messagebox.showinfo(
+                APP_NAME,
+                f"No connected {TUNE_720BT_PROFILE.display_name} was found.",
+            )
 
     def build(self) -> None:
         if self.target_profile_id is None:
+            self._show_flying_tip(self.build_button, "select target device")
             return
         output = filedialog.asksaveasfilename(
             title="Save generated tone container",
@@ -703,7 +847,7 @@ class StudioWindow:
                 if self.assignments
                 else "English_prompt_OEM.bin"
             ),
-            filetypes=[("JBL tone container", "*.bin")],
+            filetypes=[("Tone container", "*.bin")],
             confirmoverwrite=True,
         )
         if not output:
@@ -745,7 +889,7 @@ class StudioWindow:
 
     def open_existing(self) -> None:
         selected = filedialog.askopenfilename(
-            filetypes=[("JBL tone container", "*.bin"), ("All files", "*.*")]
+            filetypes=[("Tone container", "*.bin"), ("All files", "*.*")]
         )
         if not selected:
             return
@@ -808,7 +952,7 @@ class StudioWindow:
                 device_profile_id=device_profile_id,
                 progress=self._thread_progress,
             ),
-            lambda result: self._upload_complete("Prompt upload", result),
+            self._upload_complete,
             total_packets=int(self.last_build.dry_run["packet_count"]),
         )
 
@@ -832,17 +976,41 @@ class StudioWindow:
                 device_profile_id=device_profile_id,
                 progress=self._thread_progress,
             ),
-            lambda result: self._upload_complete("OEM recovery", result),
+            self._upload_complete,
             total_packets=self.engine.recovery_packet_count,
         )
 
-    def _upload_complete(self, label: str, result) -> None:
-        report, log_path = result
-        self.upload_button.set_progress(1.0, "Upload complete")
-        messagebox.showinfo(
-            APP_NAME,
-            f"{label} completed.\n\nDevice state: {report.state}\nWrites: {report.write_count}\nLog: {log_path}",
-        )
+    def _upload_complete(self, _result) -> None:
+        self._remove_uploaded_device_from_scan()
+        self.upload_button.set_progress(0.96, "Finishing…")
+        started_at = time.monotonic()
+
+        def finish() -> None:
+            self._upload_finish_job = None
+            elapsed = (time.monotonic() - started_at) * 1000
+            progress = min(1.0, elapsed / self.UPLOAD_FINISH_MS)
+            fraction = 0.96 + 0.04 * progress
+            self.upload_button.set_progress(fraction, "Finishing…")
+            if progress >= 1.0:
+                self._upload_success_latched = True
+                self.upload_button.complete()
+                self._reset_operation_ui(preserve_upload_status=True)
+                return
+            self._upload_finish_job = self.root.after(
+                self.UPLOAD_FINISH_INTERVAL_MS,
+                finish,
+            )
+
+        finish()
+
+    def _remove_uploaded_device_from_scan(self) -> None:
+        display = self.device_var.get()
+        if not display:
+            return
+        self.devices.pop(display, None)
+        self.device_models.pop(display, None)
+        self.device_combo.configure(values=tuple(self.devices))
+        self.device_var.set("")
 
     def _update_buttons(self) -> None:
         if self.busy:
@@ -883,7 +1051,7 @@ class StudioWindow:
 def main() -> None:
     root = Tk()
     try:
-        StudioWindow(root)
+        ToneSlapperWindow(root)
     except Exception as error:
         traceback.print_exc()
         messagebox.showerror(APP_NAME, user_error_message("startup", error))

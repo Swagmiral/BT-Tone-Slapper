@@ -4,7 +4,7 @@ from __future__ import annotations
 FALLBACK_MESSAGES = {
     "scan": "Device scan failed. Check that Bluetooth is turned on and try again.",
     "build": "Build failed. Check the selected audio files and save location, then try again.",
-    "open": "The selected file could not be opened as a JBL Tune 720BT prompt container.",
+    "open": "The selected file could not be opened as a supported prompt container.",
     "upload": "Upload failed. Reconnect the headphones and try again.",
     "recovery": "OEM restore failed. Reconnect the headphones and try again.",
 }
@@ -17,7 +17,7 @@ class UserFacingError(ValueError):
 def user_error_message(operation: str, error: Exception) -> str:
     if operation == "startup":
         return (
-            "JBL Tone Studio could not start because a required app file is missing "
+            "BT Tone Slapper could not start because a required app file is missing "
             "or damaged. Reinstall or extract a fresh copy of the app."
         )
     if isinstance(error, FileNotFoundError):

@@ -7,28 +7,28 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from tone_studio.bluetooth import DiscoveredDevice, scan_devices
-from tone_studio.container import build_container, validate_container
-from tone_studio.device_profiles import (
+from bt_tone_slapper.bluetooth import DiscoveredDevice, scan_devices
+from bt_tone_slapper.container import build_container, validate_container
+from bt_tone_slapper.device_profiles import (
     TUNE_720BT_PROFILE,
     normalize_device_name,
     resolve_device_profile,
 )
-from tone_studio.errors import UserFacingError, user_error_message
-from tone_studio.gui import (
+from bt_tone_slapper.errors import UserFacingError, user_error_message
+from bt_tone_slapper.gui import (
     DONATE_URL,
     SUPPORTED_AUDIO_FORMATS,
     SUPPORTED_DEVICES,
-    StudioWindow,
+    ToneSlapperWindow,
 )
-from tone_studio.protocol import SERVICE_UUID, WRITE_UUID, NOTIFY_UUID
-from tone_studio.uploader import build_dry_run
-from tone_studio.workflow import BASE_SHA256, PROMPT_LABELS, StudioEngine
+from bt_tone_slapper.protocol import SERVICE_UUID, WRITE_UUID, NOTIFY_UUID
+from bt_tone_slapper.uploader import build_dry_run
+from bt_tone_slapper.workflow import BASE_SHA256, PROMPT_LABELS, ToneSlapperEngine
 
 
 ROOT = PROJECT_ROOT
@@ -36,7 +36,7 @@ ROOT = PROJECT_ROOT
 
 class CoreTests(unittest.TestCase):
     def test_bundled_assets_and_oem_container(self) -> None:
-        engine = StudioEngine()
+        engine = ToneSlapperEngine()
         self.assertEqual(hashlib.sha256(engine.base_image.read_bytes()).hexdigest(), BASE_SHA256)
         self.assertTrue(validate_container(engine.base_image).valid)
 
@@ -55,14 +55,14 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(WRITE_UUID.endswith("0002"))
 
     def test_open_existing_prepares_upload(self) -> None:
-        engine = StudioEngine()
+        engine = ToneSlapperEngine()
         result = engine.open_existing(engine.base_image)
         self.assertTrue(result.validation.valid)
         self.assertEqual(result.sha256, BASE_SHA256)
         self.assertEqual(result.dry_run["packet_count"], 372)
 
     def test_build_overwrites_without_sidecar(self) -> None:
-        engine = StudioEngine()
+        engine = ToneSlapperEngine()
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             output = root / "reused_name.bin"
@@ -78,7 +78,7 @@ class CoreTests(unittest.TestCase):
             self.assertFalse(output.with_suffix(".bin.json").exists())
 
     def test_build_without_assignments_saves_exact_oem_image(self) -> None:
-        engine = StudioEngine()
+        engine = ToneSlapperEngine()
         with TemporaryDirectory() as temporary:
             output = Path(temporary) / "English_prompt_OEM.bin"
             result = engine.build({}, output)
@@ -89,7 +89,7 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result.dry_run["packet_count"], 372)
 
     def test_upload_uses_validated_in_memory_snapshot(self) -> None:
-        engine = StudioEngine()
+        engine = ToneSlapperEngine()
         with TemporaryDirectory() as temporary:
             candidate = Path(temporary) / "candidate.bin"
             expected_image = engine.base_image.read_bytes()
@@ -127,7 +127,7 @@ class CoreTests(unittest.TestCase):
             self.assertFalse(candidate.exists())
 
     def test_upload_changed_file_explains_how_to_continue(self) -> None:
-        engine = StudioEngine()
+        engine = ToneSlapperEngine()
         with self.assertRaisesRegex(
             ValueError,
             "File changed since it was loaded.*Open it again or rebuild before uploading",
@@ -172,14 +172,109 @@ class CoreTests(unittest.TestCase):
             service_uuids=(),
         )
         scanner = AsyncMock(return_value=[supported, unsupported])
-        with patch("tone_studio.workflow.scan_devices", scanner):
-            results = StudioEngine.scan(timeout=0)
+        with patch("bt_tone_slapper.workflow.scan_devices", scanner):
+            results = ToneSlapperEngine.scan(timeout=0)
 
         self.assertEqual(results, [supported])
         scanner.assert_awaited_once_with(timeout=0, name_contains="JBL")
 
+    def test_completed_upload_removes_stale_device_address(self) -> None:
+        class FakeVariable:
+            def __init__(self, value: str) -> None:
+                self.value = value
+
+            def get(self) -> str:
+                return self.value
+
+            def set(self, value: str) -> None:
+                self.value = value
+
+        class FakeCombo:
+            def __init__(self) -> None:
+                self.values = ()
+
+            def configure(self, **options) -> None:
+                self.values = options["values"]
+
+        selected = "JBL Tune720BT | 02:00:00:00:00:20 | Connected"
+        other = "JBL Tune720BT | 02:00:00:00:00:21 | Connected"
+        window = object.__new__(ToneSlapperWindow)
+        window.devices = {
+            selected: "02:00:00:00:00:20",
+            other: "02:00:00:00:00:21",
+        }
+        window.device_models = {
+            selected: "JBL Tune720BT",
+            other: "JBL Tune720BT",
+        }
+        window.device_var = FakeVariable(selected)
+        window.device_combo = FakeCombo()
+
+        window._remove_uploaded_device_from_scan()
+
+        self.assertNotIn(selected, window.devices)
+        self.assertNotIn(selected, window.device_models)
+        self.assertEqual(window.device_combo.values, (other,))
+        self.assertEqual(window.device_var.get(), "")
+
+    def test_upload_completion_finishes_then_latches_success(self) -> None:
+        class FakeRoot:
+            def __init__(self) -> None:
+                self.delay = None
+                self.callback = None
+
+            def after(self, delay: int, callback) -> str:
+                self.delay = delay
+                self.callback = callback
+                return "finish-job"
+
+        class FakeProgressButton:
+            def __init__(self) -> None:
+                self.updates = []
+                self.completed = False
+                self.reset_calls = []
+
+            def set_progress(self, fraction: float, text: str) -> None:
+                self.updates.append((fraction, text))
+
+            def complete(self) -> None:
+                self.completed = True
+
+            def reset(self, *, enabled: bool) -> None:
+                self.reset_calls.append(enabled)
+
+        window = object.__new__(ToneSlapperWindow)
+        window.root = FakeRoot()
+        window.upload_button = FakeProgressButton()
+        window._upload_finish_job = None
+        window._upload_success_latched = False
+        window._remove_uploaded_device_from_scan = Mock()
+        window._reset_operation_ui = Mock()
+
+        with patch("bt_tone_slapper.gui.time.monotonic", side_effect=(100.0, 100.0)):
+            window._upload_complete(None)
+
+        self.assertEqual(window.UPLOAD_FINISH_MS, 6000)
+        self.assertEqual(window.root.delay, window.UPLOAD_FINISH_INTERVAL_MS)
+        self.assertEqual(window._upload_finish_job, "finish-job")
+        window._remove_uploaded_device_from_scan.assert_called_once_with()
+
+        with patch("bt_tone_slapper.gui.time.monotonic", return_value=106.0):
+            window.root.callback()
+
+        self.assertTrue(window.upload_button.completed)
+        self.assertTrue(window._upload_success_latched)
+        self.assertEqual(window.upload_button.updates[-1][0], 1.0)
+        window._reset_operation_ui.assert_called_once_with(
+            preserve_upload_status=True
+        )
+
+        window._reset_upload_success()
+        self.assertFalse(window._upload_success_latched)
+        self.assertEqual(window.upload_button.reset_calls, [False])
+
     def test_upload_rejects_unsupported_profile_before_ble(self) -> None:
-        engine = StudioEngine()
+        engine = ToneSlapperEngine()
         with patch.object(engine, "_upload") as upload:
             with self.assertRaisesRegex(
                 UserFacingError,
@@ -251,8 +346,8 @@ class CoreTests(unittest.TestCase):
                 "CAF",
             ),
         )
-        window = object.__new__(StudioWindow)
-        with patch("tone_studio.gui.webbrowser.open", return_value=True) as open_url:
+        window = object.__new__(ToneSlapperWindow)
+        with patch("bt_tone_slapper.gui.webbrowser.open", return_value=True) as open_url:
             window.donate()
         open_url.assert_called_once_with(DONATE_URL, new=2)
 

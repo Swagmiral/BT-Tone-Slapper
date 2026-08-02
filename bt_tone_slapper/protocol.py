@@ -1,4 +1,4 @@
-"""Pure protocol implementation of the captured JBL HmOtaMgr transfer."""
+"""Pure protocol implementation of the captured HmOtaMgr transfer."""
 
 from __future__ import annotations
 
@@ -176,7 +176,7 @@ def chunk_size_for_mtu(mtu: int) -> int:
 
 
 class TransferSession:
-    """Offset-driven transfer state matching the captured JBL app behavior."""
+    """Offset-driven transfer state matching the captured official app behavior."""
 
     def __init__(
         self,

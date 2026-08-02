@@ -61,7 +61,7 @@ class BuildResult:
     dry_run: dict[str, object]
 
 
-class StudioEngine:
+class ToneSlapperEngine:
     def __init__(self) -> None:
         self.base_image = asset_path(BASE_FILENAME)
         self.ffmpeg = asset_path("ffmpeg.exe")
@@ -86,7 +86,7 @@ class StudioEngine:
     def _require_profile(profile_id: str) -> None:
         if get_device_profile(profile_id) is None:
             raise UserFacingError(
-                "This operation is only supported for JBL Tune 720BT."
+                f"This operation is only supported for {TUNE_720BT_PROFILE.display_name}."
             )
 
     def build(
@@ -113,7 +113,7 @@ class StudioEngine:
             shutil.copyfile(self.base_image, output)
         else:
             if work_dir is None:
-                work_context = tempfile.TemporaryDirectory(prefix="jbl-tone-studio-build-")
+                work_context = tempfile.TemporaryDirectory(prefix="bt-tone-slapper-build-")
             else:
                 work_dir = work_dir.resolve()
                 if not work_dir.is_dir() or any(work_dir.iterdir()):
@@ -168,17 +168,17 @@ class StudioEngine:
         *,
         profile_id: str = TUNE_720BT_PROFILE.profile_id,
     ) -> BuildResult:
-        StudioEngine._require_profile(profile_id)
+        ToneSlapperEngine._require_profile(profile_id)
         image = path.read_bytes()
         try:
             validation = validate_container_bytes(image, source=path)
         except Exception as error:
             raise UserFacingError(
-                "This file is not a valid JBL Tune 720BT prompt container."
+                f"This file is not a valid {TUNE_720BT_PROFILE.display_name} prompt container."
             ) from error
         if not validation.valid:
             raise UserFacingError(
-                "This file is not a valid JBL Tune 720BT prompt container."
+                f"This file is not a valid {TUNE_720BT_PROFILE.display_name} prompt container."
             )
         dry_run = build_dry_run(image, language=LANGUAGE_INDEX).to_dict()
         return BuildResult(
@@ -192,7 +192,8 @@ class StudioEngine:
 
     @staticmethod
     def scan(timeout: float = 8.0) -> list[DiscoveredDevice]:
-        devices = asyncio.run(scan_devices(timeout=timeout, name_contains="JBL"))
+        manufacturer = TUNE_720BT_PROFILE.display_name.partition(" ")[0]
+        devices = asyncio.run(scan_devices(timeout=timeout, name_contains=manufacturer))
         return [device for device in devices if resolve_device_profile(device.name) is not None]
 
     @staticmethod
@@ -289,7 +290,7 @@ class StudioEngine:
     ) -> tuple[UploadReport, Path]:
         total_write_count = build_dry_run(image, language=LANGUAGE_INDEX).packet_count
         if progress:
-            progress("Connecting and verifying JBL GATT service")
+            progress("Connecting and verifying device GATT service")
 
         write_counter = 0
 

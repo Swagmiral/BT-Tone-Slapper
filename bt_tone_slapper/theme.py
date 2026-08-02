@@ -302,14 +302,15 @@ def apply_dark_theme(root: Tk) -> ttk.Style:
     style.configure(
         "UtilityLink.TButton",
         background=COLORS["window"],
-        foreground=COLORS["muted"],
+        foreground="#cccccc",
         bordercolor=COLORS["window"],
         lightcolor=COLORS["window"],
         darkcolor=COLORS["window"],
         borderwidth=0,
         focusthickness=0,
         focuscolor=COLORS["window"],
-        padding=(10, 7),
+        font=("Segoe UI Semibold", 10),
+        padding=(11, 8),
         relief="flat",
     )
     style.map(

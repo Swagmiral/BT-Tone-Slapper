@@ -22,5 +22,6 @@
 
 ## Material Symbols
 
-- Reset icon variants are stored under `assets/icons/`.
+- Reset, Help, and Support icon assets are stored under `assets/icons/`.
+- Upstream project: <https://github.com/google/material-design-icons>
 - License: `assets/icons/MATERIAL_ICONS_LICENSE.txt`

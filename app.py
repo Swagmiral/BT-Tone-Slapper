@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 
-from tone_studio import APP_VERSION
+from bt_tone_slapper import APP_VERSION
 
 
 def self_test(output: Path) -> None:
@@ -24,23 +24,23 @@ def self_test(output: Path) -> None:
     checkpoint("bleak-imported")
     from tkinter import Tk
 
-    from tone_studio.gui import StudioWindow
-    from tone_studio.uploader import build_dry_run
-    from tone_studio.workflow import StudioEngine
+    from bt_tone_slapper.gui import ToneSlapperWindow
+    from bt_tone_slapper.uploader import build_dry_run
+    from bt_tone_slapper.workflow import ToneSlapperEngine
 
     checkpoint("application-imported")
     gui_root = Tk()
     gui_root.withdraw()
-    studio_window = StudioWindow(gui_root)
+    app_window = ToneSlapperWindow(gui_root)
     gui_root.update_idletasks()
     gui_size = {
         "requested_width": gui_root.winfo_reqwidth(),
         "requested_height": gui_root.winfo_reqheight(),
-        "theme": studio_window.root.tk.call("ttk::style", "theme", "use"),
+        "theme": app_window.root.tk.call("ttk::style", "theme", "use"),
     }
     gui_root.destroy()
     checkpoint("gui-constructed", **gui_size)
-    engine = StudioEngine()
+    engine = ToneSlapperEngine()
     checkpoint("assets-verified")
     validation = engine.validate(engine.base_image)
     checkpoint("oem-validated", valid=validation.valid)
@@ -77,7 +77,7 @@ def run() -> None:
     if len(sys.argv) == 2 and sys.argv[1].startswith("--self-test="):
         self_test(Path(sys.argv[1].split("=", 1)[1]))
         return
-    from tone_studio.gui import main
+    from bt_tone_slapper.gui import main
 
     main()
 

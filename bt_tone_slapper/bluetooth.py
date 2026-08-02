@@ -365,7 +365,7 @@ async def observe_notifications(
     async with client:
         inspection = inspect_service_collection(identifier, client.services)
         if not inspection.notify_capable:
-            raise RuntimeError("known JBL notification characteristic is unavailable")
+            raise RuntimeError("required notification characteristic is unavailable")
         await client.start_notify(NOTIFY_UUID, collector)
         subscribed = True
         try:

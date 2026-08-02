@@ -190,7 +190,7 @@ def build_container(
 def validate_container_bytes(image: bytes, *, source: Path | str = "<memory>") -> ValidationResult:
     errors: list[str] = []
     if len(image) < OUTER_HEADER_SIZE or not image.startswith(TONE_MAGIC):
-        raise ValueError("not a recognized JBL tone container")
+        raise ValueError("not a recognized tone container")
     words = struct.unpack_from("<13I", image)
     descriptor_count = words[2].bit_count()
     descriptor_crc_offset = 0x10 + descriptor_count * 0x10

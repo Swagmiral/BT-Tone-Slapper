@@ -23,7 +23,7 @@ if ($LASTEXITCODE -ne 0) {
     --noconfirm `
     --onefile `
     --windowed `
-    --name JBLToneStudio `
+    --name BTToneSlapper `
     --paths "$Root" `
     --hidden-import ctypes.wintypes `
     --collect-all bleak `
@@ -35,7 +35,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Portable build failed"
 }
 
-$Exe = Join-Path $Root "dist\JBLToneStudio.exe"
+$Exe = Join-Path $Root "dist\BTToneSlapper.exe"
 $Hash = Get-FileHash $Exe -Algorithm SHA256
 Write-Host "Built: $Exe"
 Write-Host "SHA-256: $($Hash.Hash.ToLowerInvariant())"

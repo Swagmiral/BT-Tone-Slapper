@@ -20,8 +20,8 @@ def asset_path(name: str) -> Path:
 
 
 def user_data_root() -> Path:
-    override = os.environ.get("JBL_TONE_STUDIO_DATA")
-    root = Path(override) if override else Path(os.environ.get("LOCALAPPDATA", Path.home())) / "JBLToneStudio"
+    override = os.environ.get("BT_TONE_SLAPPER_DATA")
+    root = Path(override) if override else Path(os.environ.get("LOCALAPPDATA", Path.home())) / "BTToneSlapper"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
