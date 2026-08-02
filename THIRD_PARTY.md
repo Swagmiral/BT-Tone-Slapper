@@ -26,9 +26,14 @@
 - Upstream project: <https://github.com/google/material-design-icons>
 - License: `assets/icons/MATERIAL_ICONS_LICENSE.txt`
 
-## OEM recovery container
+## OEM recovery containers
 
-- Repository fallback: `OEM Backups/JBL Tune 720BT/English_prompt_v0.0.5.bin`
+Pinned OEM recovery files are documented separately for each supported device
+model. They are stored in the repository as fallback sources and are not
+bundled into the portable EXE.
+
+### JBL Tune 720BT
+
+- English prompt fallback: `OEM Backups/JBL Tune 720BT/English_prompt_v0.0.5.bin`
 - Original source: <https://storage.harman.com/MyJBLHeadphones/ota/release/20b4/tone/English_prompt_v0.0.5.bin>
 - SHA-256: `91afbf099c9160fc251cf858c43b4d4df5bd9392cab5a6ab3b51ee0541d0ab9f`
-- The fallback file is not bundled into the portable EXE.
