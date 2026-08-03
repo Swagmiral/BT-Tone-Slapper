@@ -21,12 +21,12 @@ OEM_SERVER_URL = (
     "English_prompt_v0.0.5.bin"
 )
 OEM_GITHUB_URL = (
-    "https://raw.githubusercontent.com/Swagmiral/BT-Tone-Slapper/main/"
+    "https://raw.githubusercontent.com/Tselovanskyi/BT-Tone-Slapper/main/"
     "OEM%20Backups/JBL%20Tune%20720BT/"
     "English_prompt_v0.0.5.bin"
 )
 OEM_GITHUB_MANUAL_URL = (
-    "https://github.com/Swagmiral/BT-Tone-Slapper/blob/main/"
+    "https://github.com/Tselovanskyi/BT-Tone-Slapper/blob/main/"
     "OEM%20Backups/JBL%20Tune%20720BT/"
     "English_prompt_v0.0.5.bin"
 )

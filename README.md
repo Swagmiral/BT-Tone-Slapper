@@ -77,8 +77,8 @@ The tests automatically locate the project root from their location under `tests
 
 ## Author and License
 
-BT Tone Slapper was originally created by Yaroslav Tselovanskyi (Swagmiral).
-Original project: <https://github.com/Swagmiral/BT-Tone-Slapper>
+BT Tone Slapper was originally created by Yaroslav Tselovanskyi.
+Original project: <https://github.com/Tselovanskyi/BT-Tone-Slapper>
 
 The original project source is licensed under the GNU General Public License
 version 3 only, supplemented by the attribution requirements in

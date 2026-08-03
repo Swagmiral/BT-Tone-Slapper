@@ -2,6 +2,6 @@
 
 APP_NAME = "BT Tone Slapper"
 APP_VERSION = "0.2.0"
-APP_AUTHOR = "Yaroslav Tselovanskyi (Swagmiral)"
-PROJECT_URL = "https://github.com/Swagmiral/BT-Tone-Slapper"
+APP_AUTHOR = "Yaroslav Tselovanskyi"
+PROJECT_URL = "https://github.com/Tselovanskyi/BT-Tone-Slapper"
 LICENSE_NAME = "GNU GPLv3 with Section 7 attribution terms"

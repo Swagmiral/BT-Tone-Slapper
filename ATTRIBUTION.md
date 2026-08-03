@@ -1,13 +1,13 @@
 # Additional Attribution Terms
 
-Copyright (C) 2026 Yaroslav Tselovanskyi (Swagmiral)
+Copyright (C) 2026 Yaroslav Tselovanskyi
 
 BT Tone Slapper is licensed under the GNU General Public License version 3
 only, as provided in `LICENSE`, supplemented by these terms under sections
 7(b) and 7(c) of that license.
 
 These terms apply to the copyrightable original source code and documentation
-first published in this repository by Yaroslav Tselovanskyi (Swagmiral).
+first published in this repository by Yaroslav Tselovanskyi.
 
 ## Required source attribution
 
@@ -15,8 +15,10 @@ Anyone who conveys this program, a modified version, or a public source-code
 fork must preserve the following notice in the primary README at a reasonably
 prominent location:
 
-> BT Tone Slapper was originally created by Yaroslav Tselovanskyi (Swagmiral).
-> Original project: https://github.com/Swagmiral/BT-Tone-Slapper
+> BT Tone Slapper was originally created by Yaroslav Tselovanskyi.
+> Original project: https://github.com/Tselovanskyi/BT-Tone-Slapper
+
+No account username or handle is required as part of the original-author name.
 
 Additional contributor credits may be added, but this original-author notice
 must not be removed, hidden, or presented less prominently than other
@@ -29,9 +31,9 @@ must preserve an accessible and visible attribution in its Help, About,
 Credits, legal-notices screen, or an equivalent location reachable through the
 normal user interface:
 
-> Originally created by Yaroslav Tselovanskyi (Swagmiral)
+> Originally created by Yaroslav Tselovanskyi
 >
-> Original project: https://github.com/Swagmiral/BT-Tone-Slapper
+> Original project: https://github.com/Tselovanskyi/BT-Tone-Slapper
 
 The attribution does not need to remain continuously on screen. It must remain
 readily accessible to users and must not be less prominent than equivalent

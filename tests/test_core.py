@@ -35,6 +35,7 @@ from bt_tone_slapper.gui import (
 )
 from bt_tone_slapper.protocol import SERVICE_UUID, WRITE_UUID, NOTIFY_UUID
 from bt_tone_slapper.oem import (
+    OEM_GITHUB_MANUAL_URL,
     OEM_GITHUB_URL,
     OEM_SERVER_URL,
     OemAcquisitionError,
@@ -611,8 +612,18 @@ class CoreTests(unittest.TestCase):
 
     def test_help_formats_and_support_link(self) -> None:
         self.assertEqual(DONATE_URL, "https://donatello.to/polymernyk")
-        self.assertEqual(APP_AUTHOR, "Yaroslav Tselovanskyi (Swagmiral)")
-        self.assertEqual(PROJECT_URL, "https://github.com/Swagmiral/BT-Tone-Slapper")
+        self.assertEqual(APP_AUTHOR, "Yaroslav Tselovanskyi")
+        self.assertEqual(PROJECT_URL, "https://github.com/Tselovanskyi/BT-Tone-Slapper")
+        self.assertTrue(
+            OEM_GITHUB_URL.startswith(
+                "https://raw.githubusercontent.com/Tselovanskyi/BT-Tone-Slapper/"
+            )
+        )
+        self.assertTrue(
+            OEM_GITHUB_MANUAL_URL.startswith(
+                "https://github.com/Tselovanskyi/BT-Tone-Slapper/"
+            )
+        )
         self.assertEqual(
             LICENSE_NAME,
             "GNU GPLv3 with Section 7 attribution terms",
@@ -652,13 +663,17 @@ class CoreTests(unittest.TestCase):
         readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
         notice = (
             "BT Tone Slapper was originally created by "
-            "Yaroslav Tselovanskyi (Swagmiral)."
+            "Yaroslav Tselovanskyi."
         )
         self.assertIn("GNU GENERAL PUBLIC LICENSE", license_text)
         self.assertIn("Version 3, 29 June 2007", license_text)
         self.assertIn(notice, attribution_text)
         self.assertIn(notice, readme_text)
         self.assertIn(PROJECT_URL, attribution_text)
+        self.assertIn(
+            "No account username or handle is required",
+            attribution_text,
+        )
         self.assertEqual(
             LEGAL_NOTICE_FILES,
             (
