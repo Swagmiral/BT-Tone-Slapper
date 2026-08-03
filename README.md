@@ -4,7 +4,7 @@ Portable Windows application for replacing event sounds on supported Bluetooth a
 
 The prebuilt portable application is available at `dist/BTToneSlapper.exe`. 
 
-Custom sound packs are available at (Custom Sound Packs/) 
+Custom sound packs are available at [Custom Sound Packs](Custom Sound Packs/) 
 
 The OEM sounds in case you want to revert and the official links are down are available at `OEM Backups`. 
 
