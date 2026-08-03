@@ -4,7 +4,7 @@ Portable Windows application for replacing event sounds on supported Bluetooth a
 
 The prebuilt portable application is available at `dist/BTToneSlapper.exe`. 
 
-Custom sound packs are available at `Custom Sound Packs`. 
+Custom sound packs are available at (Custom Sound Packs/) 
 
 The OEM sounds in case you want to revert and the official links are down are available at `OEM Backups`. 
 
@@ -21,24 +21,6 @@ The OEM sounds in case you want to revert and the official links are down are av
 The OEM file is saved beside the EXE after successful verification. Build reuses that
 copy when valid; Restore OEM always attempts a fresh manufacturer download first.
 Unknown file sizes or hashes are rejected and are never trusted automatically.
-
-The pinned GitHub recovery copies are organized separately by device model:
-
-```text
-OEM Backups\JBL Tune 720BT\English_prompt_v0.0.5.bin
-```
-
-This repository folder is only the fallback source. Runtime downloads remain directly
-beside the portable EXE.
-
-Ready-to-upload user-created packs are grouped by manufacturer and device model:
-
-```text
-Custom Sound Packs\JBL\JBL Tune 720BT\JBL_prompts_custom.bin
-```
-
-Each device folder contains its compatible BIN and a human-readable README listing
-the customized prompts, validation details, and hash.
 
 ## Build
 
