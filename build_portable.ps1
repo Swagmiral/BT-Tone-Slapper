@@ -32,6 +32,9 @@ if ($LASTEXITCODE -ne 0) {
     --add-data "$Root\assets\ffmpeg.exe;assets" `
     --add-data "$Root\assets\LzmaAlone.exe;assets" `
     --add-data "$Root\assets\icons;assets\icons" `
+    --add-data "$Root\LICENSE;." `
+    --add-data "$Root\ATTRIBUTION.md;." `
+    --add-data "$Root\THIRD_PARTY.md;." `
     "$Root\app.py"
 
 if ($LASTEXITCODE -ne 0) {

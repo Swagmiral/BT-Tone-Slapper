@@ -19,6 +19,13 @@ def asset_path(name: str) -> Path:
     return path
 
 
+def bundled_file_path(name: str) -> Path:
+    path = bundle_root() / name
+    if not path.is_file():
+        raise FileNotFoundError(f"missing bundled file: {path}")
+    return path
+
+
 def portable_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent

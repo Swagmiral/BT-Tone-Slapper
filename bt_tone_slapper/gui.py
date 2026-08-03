@@ -18,6 +18,7 @@ from tkinter import (
     Tk,
     Toplevel,
     PhotoImage,
+    Text,
     filedialog,
     font,
     messagebox,
@@ -33,7 +34,7 @@ from .device_profiles import (
 )
 from .errors import user_error_message
 from .oem import OEM_GITHUB_MANUAL_URL, OemImage
-from .resources import asset_path
+from .resources import asset_path, bundled_file_path
 from .theme import COLORS, apply_dark_theme, apply_dark_title_bar
 from .widgets import ProgressButton, ResetButton
 from .workflow import BASE_SHA256, BuildResult, ToneSlapperEngine
@@ -65,12 +66,24 @@ SUPPORTED_AUDIO_FORMATS = (
     "CAF",
 )
 SUPPORTED_DEVICES = tuple(profile.display_name for profile in SUPPORTED_PROFILES)
+LEGAL_NOTICE_FILES = (
+    ("License", "LICENSE"),
+    ("Attribution", "ATTRIBUTION.md"),
+    ("Third-party notices", "THIRD_PARTY.md"),
+)
 WRITE_WARNING_TEXT = "Write in progress — do not power off or disconnect."
 CLOSE_BLOCKED_TEXT = (
     "A headphone write or OEM restore is still in progress.\n\n"
     "Do not power off or disconnect the headphones, disable Bluetooth, close the app, "
     "or let the PC sleep. Wait until the Upload button reports Success!"
 )
+
+
+def load_legal_documents() -> dict[str, str]:
+    return {
+        title: bundled_file_path(filename).read_text(encoding="utf-8")
+        for title, filename in LEGAL_NOTICE_FILES
+    }
 
 
 class ToneSlapperWindow:
@@ -115,6 +128,8 @@ class ToneSlapperWindow:
         )
         self._hovered_prompt: int | None = None
         self._help_window: Toplevel | None = None
+        self._legal_window: Toplevel | None = None
+        self._legal_documents = load_legal_documents()
         self._pending_oem_action: Callable[[OemImage], None] | None = None
         self._oem_context: str | None = None
         self._reset_buttons: dict[int, ResetButton] = {}
@@ -367,12 +382,21 @@ class ToneSlapperWindow:
                 justify=LEFT,
             ).pack(anchor="w", fill=X, pady=(0, 9))
 
+        help_actions = ttk.Frame(content)
+        help_actions.pack(fill=X, pady=(4, 0))
         ttk.Button(
-            content,
+            help_actions,
+            text="Legal notices",
+            style="Accent.TButton",
+            command=self.show_legal_notices,
+            takefocus=False,
+        ).pack(side=LEFT, fill=X, expand=True, padx=(0, 4))
+        ttk.Button(
+            help_actions,
             text="Close",
             command=self._close_help,
             takefocus=False,
-        ).pack(fill=X, pady=(4, 0))
+        ).pack(side=RIGHT, fill=X, expand=True, padx=(4, 0))
 
         dialog.update_idletasks()
         apply_dark_title_bar(dialog)
@@ -387,6 +411,133 @@ class ToneSlapperWindow:
         if self._help_window is not None and self._help_window.winfo_exists():
             self._help_window.destroy()
         self._help_window = None
+
+    def show_legal_notices(self) -> None:
+        if self._legal_window is not None and self._legal_window.winfo_exists():
+            self._legal_window.lift()
+            return
+
+        dialog = Toplevel(self.root)
+        self._legal_window = dialog
+        dialog.withdraw()
+        dialog.title(f"{APP_NAME} - Legal Notices")
+        dialog.configure(background=COLORS["window"])
+        dialog.minsize(620, 450)
+        dialog.transient(self.root)
+        dialog.protocol("WM_DELETE_WINDOW", self._close_legal_notices)
+        dialog.bind("<Escape>", lambda _event: self._close_legal_notices())
+
+        content = ttk.Frame(dialog, padding=(22, 18))
+        content.pack(fill=BOTH, expand=True)
+        ttk.Label(content, text="Legal Notices", style="HelpTitle.TLabel").pack(
+            anchor="w",
+        )
+        ttk.Label(
+            content,
+            text=(
+                f"Copyright (C) 2026 {APP_AUTHOR}\n"
+                f"Licensed under {LICENSE_NAME}.\n"
+                "This program comes with absolutely no warranty. You may redistribute "
+                "and modify it under the terms shown here."
+            ),
+            style="HelpBody.TLabel",
+            wraplength=660,
+            justify=LEFT,
+        ).pack(anchor="w", fill=X, pady=(8, 2))
+        ttk.Button(
+            content,
+            text=f"Open source repository  ·  {PROJECT_URL}",
+            style="UtilityLink.TButton",
+            command=self.open_source_repository,
+            takefocus=False,
+        ).pack(anchor="w", pady=(0, 10))
+
+        document_selector = ttk.Frame(content)
+        document_selector.pack(fill=X, pady=(0, 8))
+        document_frame = ttk.Frame(content, style="FieldShell.TFrame")
+        document_frame.pack(fill=BOTH, expand=True)
+        document_text = Text(
+            document_frame,
+            background=COLORS["field"],
+            foreground=COLORS["text"],
+            selectbackground=COLORS["selection"],
+            selectforeground=COLORS["text"],
+            borderwidth=0,
+            highlightthickness=0,
+            relief="flat",
+            wrap="word",
+            padx=14,
+            pady=12,
+            font=("Segoe UI", 9),
+            state="disabled",
+        )
+        document_scrollbar = ttk.Scrollbar(
+            document_frame,
+            orient="vertical",
+            command=document_text.yview,
+        )
+        document_text.configure(yscrollcommand=document_scrollbar.set)
+        document_scrollbar.pack(side=RIGHT, fill=Y)
+        document_text.pack(side=LEFT, fill=BOTH, expand=True)
+
+        document_buttons: dict[str, ttk.Button] = {}
+
+        def show_document(title: str) -> None:
+            document_text.configure(state="normal")
+            document_text.delete("1.0", "end")
+            document_text.insert("1.0", self._legal_documents[title])
+            document_text.configure(state="disabled")
+            document_text.yview_moveto(0)
+            for button_title, button in document_buttons.items():
+                button.configure(
+                    style="Accent.TButton" if button_title == title else "TButton"
+                )
+
+        for title, _filename in LEGAL_NOTICE_FILES:
+            button = ttk.Button(
+                document_selector,
+                text=title,
+                command=lambda document_title=title: show_document(document_title),
+                takefocus=False,
+            )
+            button.pack(side=LEFT, fill=X, expand=True, padx=(0, 6))
+            document_buttons[title] = button
+
+        ttk.Button(
+            content,
+            text="Close",
+            command=self._close_legal_notices,
+            takefocus=False,
+        ).pack(fill=X, pady=(12, 0))
+
+        self._legal_text = document_text
+        self._legal_buttons = document_buttons
+        show_document("License")
+        dialog.update_idletasks()
+        apply_dark_title_bar(dialog)
+        width = 720
+        height = 600
+        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
+        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.deiconify()
+
+    def _close_legal_notices(self) -> None:
+        if self._legal_window is not None and self._legal_window.winfo_exists():
+            self._legal_window.destroy()
+        self._legal_window = None
+
+    def open_source_repository(self) -> None:
+        try:
+            opened = webbrowser.open(PROJECT_URL, new=2)
+        except Exception:
+            opened = False
+        if not opened:
+            messagebox.showerror(
+                APP_NAME,
+                f"Could not open the source repository. Visit:\n\n{PROJECT_URL}",
+                parent=self._legal_window or self.root,
+            )
 
     def _close_is_blocked(self) -> bool:
         if self.active_operation in {"upload", "recovery"}:

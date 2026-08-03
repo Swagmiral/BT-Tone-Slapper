@@ -26,10 +26,12 @@ from bt_tone_slapper.errors import UserFacingError, user_error_message
 from bt_tone_slapper.gui import (
     CLOSE_BLOCKED_TEXT,
     DONATE_URL,
+    LEGAL_NOTICE_FILES,
     SUPPORTED_AUDIO_FORMATS,
     SUPPORTED_DEVICES,
     ToneSlapperWindow,
     WRITE_WARNING_TEXT,
+    load_legal_documents,
 )
 from bt_tone_slapper.protocol import SERVICE_UUID, WRITE_UUID, NOTIFY_UUID
 from bt_tone_slapper.oem import (
@@ -637,10 +639,16 @@ class CoreTests(unittest.TestCase):
         with patch("bt_tone_slapper.gui.webbrowser.open", return_value=True) as open_url:
             window.donate()
         open_url.assert_called_once_with(DONATE_URL, new=2)
+        window.root = Mock()
+        window._legal_window = Mock()
+        with patch("bt_tone_slapper.gui.webbrowser.open", return_value=True) as open_url:
+            window.open_source_repository()
+        open_url.assert_called_once_with(PROJECT_URL, new=2)
 
     def test_project_license_and_attribution_notices(self) -> None:
         license_text = (PROJECT_ROOT / "LICENSE").read_text(encoding="utf-8")
         attribution_text = (PROJECT_ROOT / "ATTRIBUTION.md").read_text(encoding="utf-8")
+        third_party_text = (PROJECT_ROOT / "THIRD_PARTY.md").read_text(encoding="utf-8")
         readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
         notice = (
             "BT Tone Slapper was originally created by "
@@ -651,6 +659,59 @@ class CoreTests(unittest.TestCase):
         self.assertIn(notice, attribution_text)
         self.assertIn(notice, readme_text)
         self.assertIn(PROJECT_URL, attribution_text)
+        self.assertEqual(
+            LEGAL_NOTICE_FILES,
+            (
+                ("License", "LICENSE"),
+                ("Attribution", "ATTRIBUTION.md"),
+                ("Third-party notices", "THIRD_PARTY.md"),
+            ),
+        )
+        self.assertEqual(
+            load_legal_documents(),
+            {
+                "License": license_text,
+                "Attribution": attribution_text,
+                "Third-party notices": third_party_text,
+            },
+        )
+        build_script = (PROJECT_ROOT / "build_portable.ps1").read_text(encoding="utf-8")
+        for filename in ("LICENSE", "ATTRIBUTION.md", "THIRD_PARTY.md"):
+            self.assertIn(f'--add-data "$Root\\{filename};."', build_script)
+
+    def test_legal_notices_window_displays_all_documents(self) -> None:
+        root = Tk()
+        root.withdraw()
+        try:
+            window = ToneSlapperWindow(root)
+            window.show_legal_notices()
+            root.update_idletasks()
+
+            self.assertIsNotNone(window._legal_window)
+            self.assertEqual(
+                window._legal_window.title(),
+                f"{APP_NAME} - Legal Notices",
+            )
+            self.assertIn(
+                "GNU GENERAL PUBLIC LICENSE",
+                window._legal_text.get("1.0", "end-1c"),
+            )
+
+            window._legal_buttons["Attribution"].invoke()
+            self.assertIn(
+                f"Originally created by {APP_AUTHOR}",
+                window._legal_text.get("1.0", "end-1c"),
+            )
+            window._legal_buttons["Third-party notices"].invoke()
+            third_party_text = window._legal_text.get("1.0", "end-1c")
+            self.assertIn("FFmpeg", third_party_text)
+            self.assertIn("Material Symbols", third_party_text)
+            self.assertEqual(
+                str(window._legal_text.cget("state")),
+                "disabled",
+            )
+        finally:
+            root.destroy()
 
     def test_scan_merges_remembered_ble_devices(self) -> None:
         class FakeScanner:
