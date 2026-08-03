@@ -2,11 +2,11 @@
 
 Portable Windows application for replacing event sounds on supported Bluetooth audio devices. The current release supports JBL Tune 720BT.
 
-The prebuilt portable application is available at `dist/BTToneSlapper.exe`. 
+The prebuilt portable application is available at [dist/BTToneSlapper.exe](dist). 
 
-Custom sound packs are available at [Custom Sound Packs](Custom Sound Packs/) 
+Custom sound packs are available at [Custom Sound Packs](Custom%20Sound%20Packs) 
 
-The OEM sounds in case you want to revert and the official links are down are available at `OEM Backups`. 
+The OEM sounds in case you want to revert and the official links are down are available at [OEM Backups](OEM%20Backups). 
 
 ## Features
 
