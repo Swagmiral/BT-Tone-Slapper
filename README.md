@@ -13,9 +13,7 @@ Portable Windows application for replacing event sounds on supported Bluetooth a
 3. Choose a complete sound pack from [Custom Sound Packs](Custom%20Sound%20Packs).
 4. Flash the sound pack.
 
-OEM recovery sound packs are also included in case you want to restore the original sounds and the official JBL download is unavailable:
-
-[OEM Backups](OEM%20Backups)
+OEM sound packs are also included in case you want to restore the original sounds and the official source is unavailable: [OEM Backups](OEM%20Backups)
 
 ## What Is What?
 
