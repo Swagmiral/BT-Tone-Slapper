@@ -4,15 +4,14 @@ Portable Windows application for replacing event sounds on supported Bluetooth a
 
 ## For Normal Users
 
-You do **not** need to build this project to flash your headphones.
+> [!IMPORTANT]
+> You do **not** need to build this project to flash your headphones.
+> Use the ready-to-use EXE from the `dist` folder.
 
-Download the ready-to-use app here:
-
-[dist/BTToneSlapper.exe](dist/BTToneSlapper.exe)
-
-Then use it with a complete sound pack:
-
-[Custom Sound Packs](Custom%20Sound%20Packs)
+1. Download the ready-to-use app: [dist/BTToneSlapper.exe](dist/BTToneSlapper.exe)
+2. Connect your headphones.
+3. Choose a complete sound pack from [Custom Sound Packs](Custom%20Sound%20Packs).
+4. Flash the sound pack.
 
 OEM recovery sound packs are also included in case you want to restore the original sounds and the official JBL download is unavailable:
 
@@ -25,8 +24,6 @@ OEM recovery sound packs are also included in case you want to restore the origi
 - **A single sound file** is only source material, such as one `.wav` or `.mp3`. You do not flash a single sound file directly.
 - **Build instructions** are only for developers who want to modify or rebuild the app.
 
-Normal user flow:
-Download EXE → connect headphones → choose sound pack → flash
 
 ## Features
 
