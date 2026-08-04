@@ -32,13 +32,13 @@ Download EXE → connect headphones → choose sound pack → flash
 
 - Converts WAV, MP3, FLAC, OGG, Opus, M4A, AAC, WMA, AIFF, AIF, and CAF audio automatically.
 - Rebuilds the indexed mSBC prompt bank and all known integrity fields.
-- Opens and validates existing compatible `.bin` containers.
+- Opens and validates existing compatible `.bin` sound packs.
 - Uploads through the verified JBL BLE service after explicit user confirmation.
-- Downloads and verifies the OEM English recovery container before every restore.
+- Downloads and verifies the OEM English recovery sound pack before every restore.
 - Falls back to the pinned OEM copy in this GitHub repository when the manufacturer download fails.
 - Produces a single portable EXE with no dependencies on the destination PC.
 
-The OEM file is saved beside the EXE after successful verification. Build reuses that
+The verified OEM recovery sound pack is saved beside the EXE. Build reuses that
 copy when valid; Restore OEM always attempts a fresh manufacturer download first.
 Unknown file sizes or hashes are rejected and are never trusted automatically.
 
@@ -68,8 +68,8 @@ dist\BTToneSlapper.exe
 ```
 
 Python, Bleak, WinRT bindings, FFmpeg, the LZMA encoder, and icons are bundled into
-the EXE. The OEM recovery container is deliberately not bundled. The destination PC
-does not need Python or additional packages.
+the EXE. The OEM recovery sound pack is deliberately not bundled for legal and portability reasons. 
+The destination PC does not need Python or additional packages, the .exe is self-sufficient.
 
 ## Verify The EXE
 
@@ -107,8 +107,8 @@ license and remain under their respective terms described in
 - `bt_tone_slapper/` — application source
 - `tests/` — development test suite
 - `assets/` — required runtime binaries and icons
-- `OEM Backups/` — pinned OEM recovery containers organized by device model
-- `Custom Sound Packs/` — user-created prompt containers with compatibility notes
+- `OEM Backups/` — pinned OEM recovery sound packs organized by device model
+- `Custom Sound Packs/` — user-created prompt sound pack with compatibility notes
 - `requirements-build.txt` — pinned build dependencies
 - `build_portable.cmd` and `build_portable.ps1` — reproducible Windows build scripts
 
