@@ -2,11 +2,31 @@
 
 Portable Windows application for replacing event sounds on supported Bluetooth audio devices. The current release supports JBL Tune 720BT.
 
-The prebuilt portable application is available at [dist/BTToneSlapper.exe](dist). 
+## For Normal Users
 
-Custom sound packs are available at [Custom Sound Packs](Custom%20Sound%20Packs) 
+You do **not** need to build this project to flash your headphones.
 
-The OEM sounds in case you want to revert and the official links are down are available at [OEM Backups](OEM%20Backups). 
+Download the ready-to-use app here:
+
+[dist/BTToneSlapper.exe](dist/BTToneSlapper.exe)
+
+Then use it with a complete sound pack:
+
+[Custom Sound Packs](Custom%20Sound%20Packs)
+
+OEM recovery sound packs are also included in case you want to restore the original sounds and the official JBL download is unavailable:
+
+[OEM Backups](OEM%20Backups)
+
+## What Is What?
+
+- **BT Tone Slapper** is the app. It runs on Windows and flashes sound packs to the headphones.
+- **A sound pack** is a complete `.bin` file made for a specific headphone model.
+- **A single sound file** is only source material, such as one `.wav` or `.mp3`. You do not flash a single sound file directly.
+- **Build instructions** are only for developers who want to modify or rebuild the app.
+
+Normal user flow:
+Download EXE → connect headphones → choose sound pack → flash
 
 ## Features
 
@@ -22,7 +42,12 @@ The OEM file is saved beside the EXE after successful verification. Build reuses
 copy when valid; Restore OEM always attempts a fresh manufacturer download first.
 Unknown file sizes or hashes are rejected and are never trusted automatically.
 
-## Build
+## Build (for developers)
+
+> [!NOTE]
+> Use the pre-built .exe in the [dist](dist) folder if you just want to use the program.
+
+
 
 Requirements on the build PC:
 
