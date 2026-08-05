@@ -20,11 +20,27 @@
 - Bundled into the portable EXE by PyInstaller.
 - Used for Windows Bluetooth LE discovery, GATT verification, and acknowledged characteristic writes.
 
+## Qt for Python
+
+- UI framework: PySide6 Essentials 6.11.1 with Qt 6.11.1 and Shiboken6 6.11.1
+- Project: <https://doc.qt.io/qtforpython-6/>
+- Source: <https://code.qt.io/cgit/pyside/pyside-setup.git/>
+- License for this GPLv3 application: GNU General Public License version 3
+- Only the Qt Core, GUI, and Widgets functionality required by the application is bundled.
+
 ## Material Symbols
 
 - Reset, Help, and Support icon assets are stored under `assets/icons/`.
 - Upstream project: <https://github.com/google/material-design-icons>
 - License: `assets/icons/MATERIAL_ICONS_LICENSE.txt`
+
+## DM Sans
+
+- Bundled variable font: `assets/fonts/dm-sans/DMSans-Variable.ttf`
+- Source: <https://github.com/google/fonts/tree/main/ofl/dmsans>
+- Copyright 2014 The DM Sans Project Authors
+- License: SIL Open Font License 1.1, included at `assets/fonts/dm-sans/OFL.txt`
+- Variable font SHA-256: `8cd08d97e89c24d0aa92edd2f0f4c8ee6195eee9b7c9f154865a58b02f0c1c0d`
 
 ## OEM recovery containers
 

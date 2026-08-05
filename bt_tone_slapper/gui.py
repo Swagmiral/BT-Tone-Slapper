@@ -1,29 +1,47 @@
 from __future__ import annotations
 
+import os
 import re
+import sys
 import threading
 import time
 import traceback
 import webbrowser
 from pathlib import Path
 from typing import Callable
-from tkinter import (
-    BOTH,
-    Canvas,
-    LEFT,
-    RIGHT,
-    X,
-    Y,
-    StringVar,
-    Tk,
-    Toplevel,
-    PhotoImage,
-    Text,
-    filedialog,
-    font,
-    messagebox,
+
+from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QBrush,
+    QCloseEvent,
+    QColor,
+    QFontMetrics,
+    QIcon,
+    QKeySequence,
+    QResizeEvent,
+    QShortcut,
 )
-from tkinter import ttk
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QStackedLayout,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from . import APP_AUTHOR, APP_NAME, APP_VERSION, LICENSE_NAME, PROJECT_URL
 from .device_profiles import (
@@ -33,15 +51,32 @@ from .device_profiles import (
     resolve_device_profile,
 )
 from .errors import user_error_message
+from .fonts import apply_variable_font_axes, emphasis_font
 from .oem import OEM_GITHUB_MANUAL_URL, OemImage
 from .resources import asset_path, bundled_file_path
-from .theme import COLORS, apply_dark_theme, apply_dark_title_bar
-from .widgets import ProgressButton, ResetButton
+from .theme import (
+    COLORS,
+    apply_dark_theme,
+    apply_dark_title_bar,
+    refresh_style,
+)
+from .widgets import (
+    AdaptiveButtonRow,
+    FlyingTip,
+    MinimalComboBox,
+    ProgressButton,
+    PromptTable,
+    ResetButton,
+    RoundedPanel,
+)
 from .workflow import BASE_SHA256, BuildResult, ToneSlapperEngine
 
 
 AUDIO_TYPES = [
-    ("Common audio", "*.wav *.mp3 *.flac *.ogg *.oga *.opus *.m4a *.aac *.wma *.aif *.aiff *.caf"),
+    (
+        "Common audio",
+        "*.wav *.mp3 *.flac *.ogg *.oga *.opus *.m4a *.aac *.wma *.aif *.aiff *.caf",
+    ),
     ("Wave audio", "*.wav"),
     ("MP3 audio", "*.mp3"),
     ("FLAC audio", "*.flac"),
@@ -66,12 +101,12 @@ SUPPORTED_AUDIO_FORMATS = (
     "CAF",
 )
 SUPPORTED_DEVICES = tuple(profile.display_name for profile in SUPPORTED_PROFILES)
+WINDOWS_FONT_PLATFORM = "windows:fontengine=freetype"
 LEGAL_NOTICE_FILES = (
     ("License", "LICENSE"),
     ("Attribution", "ATTRIBUTION.md"),
     ("Third-party notices", "THIRD_PARTY.md"),
 )
-WRITE_WARNING_TEXT = "Write in progress — do not power off or disconnect."
 CLOSE_BLOCKED_TEXT = (
     "A headphone write or OEM restore is still in progress.\n\n"
     "Do not power off or disconnect the headphones, disable Bluetooth, close the app, "
@@ -86,24 +121,134 @@ def load_legal_documents() -> dict[str, str]:
     }
 
 
-class ToneSlapperWindow:
+def _qt_parent(parent) -> QWidget | None:
+    return parent if isinstance(parent, QWidget) else None
+
+
+class _MessageBoxAdapter:
+    @staticmethod
+    def showerror(title: str, message: str, *, parent=None) -> None:
+        QMessageBox.critical(_qt_parent(parent), title, message)
+
+    @staticmethod
+    def showwarning(title: str, message: str, *, parent=None) -> None:
+        QMessageBox.warning(_qt_parent(parent), title, message)
+
+    @staticmethod
+    def showinfo(title: str, message: str, *, parent=None) -> None:
+        QMessageBox.information(_qt_parent(parent), title, message)
+
+    @staticmethod
+    def askyesno(
+        title: str,
+        message: str,
+        *,
+        icon: str | None = None,
+        parent=None,
+    ) -> bool:
+        _ = icon
+        result = QMessageBox.question(
+            _qt_parent(parent),
+            title,
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return result == QMessageBox.StandardButton.Yes
+
+
+class _FileDialogAdapter:
+    @staticmethod
+    def _filters(filetypes) -> str:
+        return ";;".join(f"{label} ({patterns})" for label, patterns in filetypes)
+
+    @classmethod
+    def askopenfilename(
+        cls,
+        *,
+        title: str = "",
+        filetypes=None,
+        parent=None,
+        **_options,
+    ) -> str:
+        selected, _filter = QFileDialog.getOpenFileName(
+            _qt_parent(parent),
+            title,
+            "",
+            cls._filters(filetypes or [("All files", "*.*")]),
+        )
+        return selected
+
+    @classmethod
+    def asksaveasfilename(
+        cls,
+        *,
+        title: str = "",
+        initialfile: str = "",
+        defaultextension: str = "",
+        filetypes=None,
+        parent=None,
+        **_options,
+    ) -> str:
+        selected, _filter = QFileDialog.getSaveFileName(
+            _qt_parent(parent),
+            title,
+            initialfile,
+            cls._filters(filetypes or [("All files", "*.*")]),
+        )
+        if selected and defaultextension and not Path(selected).suffix:
+            selected += defaultextension
+        return selected
+
+
+messagebox = _MessageBoxAdapter()
+filedialog = _FileDialogAdapter()
+
+
+class _StringValue:
+    def __init__(
+        self,
+        value: str = "",
+        changed: Callable[[str], None] | None = None,
+    ) -> None:
+        self._value = value
+        self._changed = changed
+
+    def get(self) -> str:
+        return self._value
+
+    def set(self, value: str) -> None:
+        self._value = str(value)
+        if self._changed is not None:
+            self._changed(self._value)
+
+    def set_callback(self, changed: Callable[[str], None] | None) -> None:
+        self._changed = changed
+
+
+class _WorkerSignals(QObject):
+    completed = Signal(object, object)
+    failed = Signal(object)
+    progress = Signal(str)
+
+
+class ToneSlapperWindow(QMainWindow):
     SCAN_TEXT = "Scan for devices"
     BUILD_TEXT = "Build"
-    OPEN_TEXT = "Open existing…"
+    OPEN_TEXT = "Open sound pack…"
     UPLOAD_TEXT = "Upload"
     BUILD_SUCCESS_MS = 3000
     UPLOAD_FINISH_MS = 6000
     UPLOAD_FINISH_INTERVAL_MS = 50
 
-    def __init__(self, root: Tk) -> None:
-        self.root = root
-        self.root.title(f"{APP_NAME} {APP_VERSION}")
-        self.root.geometry("820x720")
-        self.root.minsize(680, 700)
-        apply_dark_theme(self.root)
-        app_icon = str(asset_path("icons/app_icon.ico"))
-        self.root.iconbitmap(app_icon)
-        self.root.iconbitmap(default=app_icon)
+    def __init__(self) -> None:
+        super().__init__()
+        self.root = self
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
+        self.resize(820, 736)
+        self.setMinimumSize(680, 700)
+        self.setWindowIcon(QIcon(str(asset_path("icons/app_icon.ico"))))
+
         self.engine = ToneSlapperEngine()
         self.assignments: dict[int, Path] = {}
         self.devices: dict[str, str] = {}
@@ -115,417 +260,572 @@ class ToneSlapperWindow:
         self.busy = False
         self.active_operation: str | None = None
         self.active_total_packets = 0
-        self._prompt_refresh_job: str | None = None
-        self._build_status_job: str | None = None
-        self._upload_finish_job: str | None = None
+        self._build_status_job: QTimer | None = None
+        self._upload_finish_job: QTimer | None = None
         self._upload_success_latched = False
-        self._tip_job: str | None = None
-        self._tip_canvas: Canvas | None = None
-        self._tip_font = font.Font(
-            root=self.root,
-            family="Segoe UI Semibold",
-            size=10,
-        )
         self._hovered_prompt: int | None = None
-        self._help_window: Toplevel | None = None
-        self._legal_window: Toplevel | None = None
+        self._help_window: QDialog | None = None
+        self._legal_window: QDialog | None = None
         self._legal_documents = load_legal_documents()
         self._pending_oem_action: Callable[[OemImage], None] | None = None
         self._oem_context: str | None = None
         self._reset_buttons: dict[int, ResetButton] = {}
-        self._source_labels: dict[int, ttk.Label] = {}
-        self._help_icon = PhotoImage(
-            file=str(asset_path("icons/material_help_outline_white_18.png"))
-        )
-        self._support_icon = PhotoImage(
-            file=str(asset_path("icons/material_favorite_white_18.png"))
-        )
+        self._force_close = False
 
-        self.device_var = StringVar()
-        self.target_var = StringVar()
-        self.output_var = StringVar(value=self.OPEN_TEXT)
+        self.device_var = _StringValue()
+        self.output_var = _StringValue(self.OPEN_TEXT)
+        self._signals = _WorkerSignals(self)
+        self._signals.completed.connect(self._finish_success)
+        self._signals.failed.connect(self._finish_error)
+        self._signals.progress.connect(self._apply_progress)
+
         self._build_layout()
-        self.root.protocol("WM_DELETE_WINDOW", self._request_close)
-        self.root.bind("<F1>", lambda _event: self.show_help())
+        self.output_var.set_callback(self._refresh_package_text)
+        self.output_var.set(self.OPEN_TEXT)
+        self._flying_tip = FlyingTip(self.centralWidget())
+        self._help_shortcut = QShortcut(QKeySequence("F1"), self)
+        self._help_shortcut.activated.connect(self.show_help)
         self._refresh_prompt_rows()
         self._update_buttons()
+        apply_variable_font_axes(self)
+        QTimer.singleShot(0, lambda: apply_dark_title_bar(self))
+
+    def after(self, delay: int, callback: Callable, *args) -> QTimer:
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+
+        def invoke() -> None:
+            callback(*args)
+            timer.deleteLater()
+
+        timer.timeout.connect(invoke)
+        timer.start(delay)
+        return timer
+
+    def after_idle(self, callback: Callable, *args) -> QTimer:
+        return self.after(0, callback, *args)
 
     @staticmethod
-    def _card(parent):
-        return ttk.Frame(parent, style="Card.TFrame")
+    def after_cancel(timer: QTimer | None) -> None:
+        if timer is not None:
+            timer.stop()
+            timer.deleteLater()
+
+    def destroy(self) -> None:
+        self._force_close = True
+        self.close()
+
+    def _set_button_style(
+        self,
+        button: QPushButton,
+        *,
+        role: str,
+        available: bool = True,
+    ) -> None:
+        button.setProperty("role", role)
+        button.setProperty("available", available)
+        refresh_style(button)
 
     def _build_layout(self) -> None:
-        outer = ttk.Frame(self.root, padding=(18, 14))
-        outer.pack(fill=BOTH, expand=True)
+        central = QWidget(self)
+        self.setCentralWidget(central)
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(18, 4, 18, 10)
+        outer.setSpacing(0)
 
-        content = ttk.Frame(outer)
-        content.pack(fill=BOTH, expand=True)
+        device_row = QHBoxLayout()
+        device_row.setContentsMargins(14, 8, 14, 8)
+        device_row.setSpacing(8)
+        self.device_combo = MinimalComboBox(central)
+        self.device_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.device_combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.device_combo.currentTextChanged.connect(self._combo_changed)
+        device_row.addWidget(self.device_combo, 1)
+        self.scan_button = QPushButton(self.SCAN_TEXT, central)
+        self.scan_button.setObjectName("scanButton")
+        self.scan_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.scan_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.scan_button.setFixedWidth(218)
+        self.scan_button.clicked.connect(self.scan)
+        device_row.addWidget(self.scan_button)
+        outer.addLayout(device_row)
+        outer.addSpacing(12)
 
-        device_card = self._card(content)
-        device_card.pack(fill=X, pady=(0, 8))
-        device_row = ttk.Frame(device_card, style="CardBody.TFrame")
-        device_row.pack(fill=X, padx=14, pady=12)
-        device_selector = ttk.Frame(device_row, style="FieldShell.TFrame")
-        device_selector.pack(side=LEFT, fill=X, expand=True, padx=(0, 8))
-        self.device_combo = ttk.Combobox(
-            device_selector,
-            textvariable=self.device_var,
-            state="readonly",
-            style="Minimal.TCombobox",
-            takefocus=False,
+        self.prompt_card = RoundedPanel(central, corner_radius=14)
+        self.prompt_card.setObjectName("promptPanel")
+        self.prompt_card.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
         )
-        self.device_combo.pack(fill=X, expand=True, padx=1, pady=1)
-        self.device_combo.bind("<<ComboboxSelected>>", self._device_selected)
-        self.device_combo.bind("<Button-1>", self._clear_device_text_selection, add="+")
-        self.device_combo.bind("<FocusIn>", self._clear_device_text_selection, add="+")
-        self.scan_button = ttk.Button(
-            device_row,
-            text=self.SCAN_TEXT,
-            width=20,
-            command=self.scan,
-            takefocus=False,
-        )
-        self.scan_button.pack(side=LEFT)
+        self.prompt_stack = QStackedLayout(self.prompt_card)
+        self.prompt_stack.setContentsMargins(0, 0, 0, 0)
 
-        self.target_label = ttk.Label(
-            content,
-            textvariable=self.target_var,
-            style="BuildTarget.TLabel",
-        )
-        self.prompt_card = ttk.Frame(content, style="PromptCard.TFrame")
-        self.prompt_card.pack(fill=BOTH, expand=True, pady=(0, 14))
-        self.prompt_table = ttk.Frame(self.prompt_card, style="PromptBody.TFrame")
-        self.prompt_table.pack(fill=BOTH, expand=True)
-        self.prompt_empty_label = ttk.Label(
-            self.prompt_table,
-            text="Select a device first",
-            style="PromptEmpty.TLabel",
-            font=("Segoe UI", 22, "bold"),
-            anchor="center",
-            justify="center",
-        )
-        self.prompt_tree = ttk.Treeview(
-            self.prompt_table,
-            columns=("index", "event", "source", "reset"),
-            show="headings",
-            height=11,
-            selectmode="none",
-            style="Prompt.Treeview",
-            takefocus=False,
-        )
-        self.prompt_tree.heading("index", text="INDEX", anchor="center")
-        self.prompt_tree.heading("event", text="EVENT", anchor="w")
-        self.prompt_tree.heading("source", text="AUDIO SOURCE", anchor="center")
-        self.prompt_tree.heading("reset", text="", anchor="center")
-        self.prompt_tree.column("index", width=64, anchor="center", stretch=False)
-        self.prompt_tree.column("event", width=210, anchor="w", stretch=False)
-        self.prompt_tree.column("source", width=300, anchor="center", stretch=True)
-        self.prompt_tree.column("reset", width=88, anchor="center", stretch=False)
-        self.prompt_tree.tag_configure("custom", foreground="#ffad98")
-        self.prompt_tree.tag_configure("hover", background=COLORS["surface_hover"])
-        self.prompt_scrollbar = ttk.Scrollbar(
-            self.prompt_table,
-            orient="vertical",
-            command=self.prompt_tree.yview,
-        )
-        self.prompt_tree.configure(yscrollcommand=self._prompt_scroll_changed)
-        self._tree_font = font.Font(root=self.root, family="Segoe UI", size=9)
-        self.prompt_tree.bind("<Button-1>", self._prompt_click)
-        self.prompt_tree.bind("<Double-1>", self._block_column_resize)
-        self.prompt_tree.bind("<Motion>", self._prompt_motion)
-        self.prompt_tree.bind("<Leave>", self._prompt_leave)
-        self.prompt_tree.bind("<Configure>", self._schedule_prompt_refresh)
-        self.prompt_tree.bind("<MouseWheel>", self._prompt_mousewheel)
+        self.prompt_empty_label = QLabel("Select a device first", self.prompt_card)
+        self.prompt_empty_label.setObjectName("promptEmpty")
+        self.prompt_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.prompt_empty_label.setFont(emphasis_font(18))
+        self.prompt_stack.addWidget(self.prompt_empty_label)
 
-        action_controls = ttk.Frame(content, style="CardBody.TFrame")
-        action_controls.pack(fill=X, padx=14, pady=(0, 12))
-        self.validate_button = ttk.Button(
-            action_controls,
-            textvariable=self.output_var,
-            style="Path.TButton",
-            command=self.open_existing,
-            takefocus=False,
+        self.prompt_tree = PromptTable(self.prompt_card)
+        self.prompt_tree.setColumnCount(4)
+        self.prompt_tree.setHorizontalHeaderLabels(
+            ("INDEX", "EVENT", "AUDIO SOURCE", "")
         )
-        self.validate_button.pack(fill=X, pady=(0, 6))
-        self.validate_button.bind("<Button-1>", self._open_button_pressed, add="+")
-        self.build_button = ttk.Button(
-            action_controls,
-            text=self.BUILD_TEXT,
-            command=self.build,
-            takefocus=False,
+        self.prompt_tree.verticalHeader().hide()
+        header = self.prompt_tree.horizontalHeader()
+        header.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        header.viewport().setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground,
+            True,
         )
-        self.build_button.pack(fill=X)
-        self.build_button.bind("<Button-1>", self._build_button_pressed, add="+")
-        self.write_warning_label = ttk.Label(
-            action_controls,
-            text=WRITE_WARNING_TEXT,
-            style="WriteWarning.TLabel",
-            font=("Segoe UI Semibold", 10, "bold"),
-            anchor="center",
-            justify="center",
-        )
-        self.upload_button = ProgressButton(
-            action_controls,
-            text=self.UPLOAD_TEXT,
-            command=self.upload,
-        )
-        self.upload_button.pack(fill=X, pady=(8, 0))
-        self.upload_button.bind("<Button-1>", self._upload_button_pressed, add="+")
-        self.recovery_button = ttk.Button(
-            action_controls,
-            text="Restore OEM English",
-            style="RecoveryLink.TButton",
-            command=self.restore,
-            takefocus=False,
-        )
-        self.recovery_button.pack(fill=X, pady=(8, 0))
-        self.recovery_button.bind("<Button-1>", self._recovery_button_pressed, add="+")
+        header.viewport().setAutoFillBackground(False)
+        header.setSectionsClickable(False)
+        header.setSectionsMovable(False)
+        header.setHighlightSections(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.prompt_tree.setColumnWidth(0, 64)
+        self.prompt_tree.setColumnWidth(1, 210)
+        self.prompt_tree.setColumnWidth(3, 88)
+        self.prompt_tree.setWordWrap(False)
+        self.prompt_tree.cellClicked.connect(self._prompt_cell_clicked)
+        self.prompt_tree.row_hovered.connect(self._prompt_row_hovered)
+        self.prompt_stack.addWidget(self.prompt_tree)
+        outer.addWidget(self.prompt_card, 1)
 
-        utility_footer = ttk.Frame(content)
-        utility_footer.pack(fill=X, padx=14)
-        self.help_button = ttk.Button(
-            utility_footer,
-            text="Help",
-            image=self._help_icon,
-            compound=LEFT,
-            style="UtilityLink.TButton",
-            command=self.show_help,
-            takefocus=False,
+        action_controls = QVBoxLayout()
+        action_controls.setContentsMargins(14, 0, 14, 8)
+        action_controls.setSpacing(0)
+
+        self.workflow_slot = QWidget(central)
+        self.workflow_slot.setFixedHeight(42)
+        self.workflow_stack = QStackedLayout(self.workflow_slot)
+        self.workflow_stack.setContentsMargins(0, 0, 0, 0)
+
+        self.build_button = QPushButton(self.BUILD_TEXT, self.workflow_slot)
+        self.build_button.setObjectName("buildButton")
+        self.build_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.build_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.build_button.clicked.connect(self._build_button_pressed)
+        self.build_button_row = AdaptiveButtonRow(
+            self.build_button,
+            self.workflow_slot,
         )
-        self.help_button.pack(side=LEFT)
-        self.support_button = ttk.Button(
-            utility_footer,
-            text="Support development",
-            image=self._support_icon,
-            compound=LEFT,
-            style="UtilityLink.TButton",
-            command=self.donate,
-            takefocus=False,
+        self.workflow_stack.addWidget(self.build_button_row)
+
+        self.open_divider = QWidget(self.workflow_slot)
+        divider_layout = QHBoxLayout(self.open_divider)
+        divider_layout.setContentsMargins(0, 0, 0, 0)
+        divider_layout.setSpacing(10)
+        left_line = QFrame(self.open_divider)
+        right_line = QFrame(self.open_divider)
+        for line in (left_line, right_line):
+            line.setObjectName("orDividerLine")
+            line.setFixedHeight(1)
+        divider_layout.addWidget(left_line, 1)
+        self.open_divider_label = QLabel("OR", self.open_divider)
+        self.open_divider_label.setObjectName("orDividerLabel")
+        self.open_divider_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        divider_layout.addWidget(self.open_divider_label)
+        divider_layout.addWidget(right_line, 1)
+        self.workflow_stack.addWidget(self.open_divider)
+
+        action_controls.addWidget(self.workflow_slot)
+        action_controls.addSpacing(2)
+
+        self.package_row = QWidget(central)
+        package_layout = QHBoxLayout(self.package_row)
+        package_layout.setContentsMargins(0, 0, 0, 0)
+        package_layout.setSpacing(4)
+
+        self.validate_button = QPushButton(self.OPEN_TEXT, self.package_row)
+        self.validate_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.validate_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.validate_button.clicked.connect(self._open_button_pressed)
+        self._set_button_style(self.validate_button, role="path", available=False)
+        package_layout.addWidget(self.validate_button, 1)
+
+        self.clear_package_button = QPushButton("×", self.package_row)
+        self.clear_package_button.setAccessibleName("Unload sound pack")
+        self.clear_package_button.setToolTip("Unload sound pack")
+        self.clear_package_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.clear_package_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_package_button.setFixedWidth(38)
+        self.clear_package_button.clicked.connect(self._clear_loaded_package)
+        self._set_button_style(self.clear_package_button, role="clearPackage")
+        self.clear_package_button.hide()
+        package_layout.addWidget(self.clear_package_button)
+
+        self.package_button_row = AdaptiveButtonRow(
+            self.package_row,
+            central,
         )
-        self.support_button.pack(side=RIGHT)
+        action_controls.addWidget(self.package_button_row)
+        action_controls.addSpacing(32)
+
+        self.upload_button = ProgressButton(self.UPLOAD_TEXT, central)
+        self.upload_button.clicked.connect(self._upload_button_pressed)
+        self.upload_button_row = AdaptiveButtonRow(
+            self.upload_button,
+            central,
+        )
+        self.upload_button.progress_mode_changed.connect(
+            self.upload_button_row.set_expanded
+        )
+        action_controls.addWidget(self.upload_button_row)
+        action_controls.addSpacing(16)
+
+        self.recovery_button = QPushButton("Restore OEM English", central)
+        self.recovery_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.recovery_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.recovery_button.clicked.connect(self._recovery_button_pressed)
+        self._set_button_style(
+            self.recovery_button,
+            role="recovery",
+            available=False,
+        )
+        self.recovery_button.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.recovery_button_row = QWidget(central)
+        recovery_layout = QHBoxLayout(self.recovery_button_row)
+        recovery_layout.setContentsMargins(0, 0, 0, 0)
+        recovery_layout.setSpacing(0)
+        recovery_layout.addStretch(1)
+        recovery_layout.addWidget(self.recovery_button)
+        recovery_layout.addStretch(1)
+        action_controls.addWidget(self.recovery_button_row)
+        outer.addLayout(action_controls)
+        outer.addSpacing(32)
+
+        utility_footer = QHBoxLayout()
+        utility_footer.setContentsMargins(14, 0, 14, 0)
+        utility_footer.setSpacing(8)
+        self.help_button = QPushButton("Help", central)
+        self.help_button.setIcon(
+            QIcon(str(asset_path("icons/material_help_outline_white_18.png")))
+        )
+        self.help_button.setIconSize(QSize(18, 18))
+        self.help_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.help_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.help_button.clicked.connect(self.show_help)
+        self._set_button_style(self.help_button, role="link")
+        utility_footer.addWidget(self.help_button)
+        utility_footer.addStretch(1)
+        self.support_button = QPushButton("Support development", central)
+        self.support_button.setIcon(
+            QIcon(str(asset_path("icons/material_favorite_white_18.png")))
+        )
+        self.support_button.setIconSize(QSize(18, 18))
+        self.support_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.support_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.support_button.clicked.connect(self.donate)
+        self._set_button_style(self.support_button, role="link")
+        utility_footer.addWidget(self.support_button)
+        outer.addLayout(utility_footer)
+
+    def _dialog_button(
+        self,
+        text: str,
+        callback: Callable,
+        *,
+        role: str = "",
+    ) -> QPushButton:
+        button = QPushButton(text)
+        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.clicked.connect(callback)
+        if role:
+            self._set_button_style(button, role=role)
+        return button
+
+    def _help_label(
+        self,
+        text: str,
+        *,
+        object_name: str,
+        wrap: bool = False,
+    ) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName(object_name)
+        label.setWordWrap(wrap)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        return label
 
     def show_help(self) -> None:
-        if self._help_window is not None and self._help_window.winfo_exists():
-            self._help_window.lift()
+        if self._help_window is not None:
+            self._help_window.raise_()
+            self._help_window.activateWindow()
             return
 
-        dialog = Toplevel(self.root)
+        dialog = QDialog(self)
         self._help_window = dialog
-        dialog.withdraw()
-        dialog.title(f"{APP_NAME} - Help")
-        dialog.configure(background=COLORS["window"])
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.protocol("WM_DELETE_WINDOW", self._close_help)
-        dialog.bind("<Escape>", lambda _event: self._close_help())
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.setWindowTitle(f"{APP_NAME} - Help")
+        dialog.setWindowIcon(self.windowIcon())
+        dialog.setModal(False)
+        dialog.setFixedWidth(560)
+        screen = dialog.screen() or QApplication.primaryScreen()
+        available_height = screen.availableGeometry().height() if screen else 800
+        dialog.resize(560, min(820, max(560, available_height - 80)))
+        dialog.finished.connect(lambda _result: setattr(self, "_help_window", None))
 
-        content = ttk.Frame(dialog, padding=(22, 18))
-        content.pack(fill=BOTH, expand=True)
-        ttk.Label(content, text="How to use BT Tone Slapper", style="HelpTitle.TLabel").pack(
-            anchor="w", pady=(0, 14)
+        content = QVBoxLayout(dialog)
+        content.setContentsMargins(22, 18, 22, 18)
+        content.setSpacing(0)
+        content.addWidget(
+            self._help_label(
+                "How to use BT Tone Slapper",
+                object_name="helpTitle",
+            )
         )
+        content.addSpacing(14)
+
+        help_scroll = QScrollArea(dialog)
+        help_scroll.setObjectName("helpScroll")
+        help_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        help_scroll.setWidgetResizable(True)
+        help_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        help_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        help_sections = QWidget(help_scroll)
+        sections_layout = QVBoxLayout(help_sections)
+        sections_layout.setContentsMargins(0, 0, 8, 0)
+        sections_layout.setSpacing(0)
+
+        def add_help_item(widget: QWidget) -> None:
+            item_layout = QHBoxLayout()
+            item_layout.setContentsMargins(14, 0, 8, 0)
+            item_layout.setSpacing(6)
+            bullet = self._help_label("•", object_name="helpBullet")
+            bullet.setAlignment(
+                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter
+            )
+            bullet.setFixedWidth(10)
+            item_layout.addWidget(bullet)
+            item_layout.addWidget(widget, 1)
+            sections_layout.addLayout(item_layout)
+            sections_layout.addSpacing(6)
+
+        def add_help_text(text: str) -> None:
+            body_label = self._help_label(
+                text,
+                object_name="helpBody",
+                wrap=True,
+            )
+            body_label.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+            body_label.setMinimumHeight(body_label.heightForWidth(470))
+            add_help_item(body_label)
 
         sections = (
             (
                 "1. Connect",
-                "Connect the headphones to Windows normally.\n"
-                f"In this app click Scan for devices, then select the connected "
-                f"{TUNE_720BT_PROFILE.display_name} if "
-                "multiple supported devices are connected.",
+                (
+                    "Connect the headphones to your computer normally.",
+                    "In this app click Scan for devices, then select the connected "
+                    "headphones if multiple supported devices are connected.",
+                ),
             ),
             (
-                "2. Choose sounds",
-                "In the list of prompts click a prompt row you want to change and choose "
-                "an audio file.\n\n"
-                "Use Reset on that row if you want to return it to OEM English.\n\n"
-                "Supported audio formats:\n"
-                f"{', '.join(SUPPORTED_AUDIO_FORMATS)}.\n"
-                "Sample rate, bit depth, and channel count are converted automatically.",
+                "2. Choose sounds (optional)",
+                (
+                    "To create a custom sound pack, assign regular audio files to the "
+                    "prompts you want to replace.",
+                    "In the list of prompts click a prompt row you want to change and "
+                    "choose an audio file.",
+                    "Use Reset on that row if you want to return it to OEM English.",
+                    f"Supported audio formats: {', '.join(SUPPORTED_AUDIO_FORMATS)}.",
+                    "Sample rate, bit depth, and channel count are converted automatically.",
+                    "Skip this step when using an existing .BIN sound pack.",
+                ),
             ),
             (
-                "3. Build or open",
-                "Click Build and choose where to save the .BIN prompt container. To reuse "
-                "a previous .BIN container, click Open existing instead.",
+                "3. Build or open a sound pack",
+                (
+                    "If you assigned custom audio, click Build and choose where to save "
+                    "the complete .BIN sound pack.",
+                    "Alternatively, click Open sound pack to load an existing .BIN "
+                    "package directly. Opening a sound pack does not require choosing "
+                    "sounds or building.",
+                ),
             ),
             (
                 "4. Upload",
-                "Keep the headphones powered on and connected.\n"
-                "Click Upload, review the confirmation, and do not disconnect them until "
-                "the upload finishes.",
+                (
+                    "Keep the headphones powered on and connected.",
+                    "Click Upload, review the confirmation, and do not disconnect them "
+                    "until the upload finishes.",
+                ),
             ),
             (
                 "Recovery",
-                "Restore OEM English downloads and verifies the original English prompts "
-                "before uploading them. If the manufacturer download fails, the app can "
-                "use the pinned copy from the BT Tone Slapper GitHub repository.",
+                (
+                    "Restore OEM English downloads and verifies the original English "
+                    "prompts before uploading them.",
+                    "If the manufacturer download fails, the app can use the pinned "
+                    "copy from the BT Tone Slapper GitHub repository.",
+                ),
             ),
             (
                 "Currently supported devices",
-                ", ".join(SUPPORTED_DEVICES),
-            ),
-            (
-                "About and license",
-                f"Originally created by {APP_AUTHOR}\n"
-                f"Original project: {PROJECT_URL}\n"
-                f"License: {LICENSE_NAME}",
+                tuple(SUPPORTED_DEVICES),
             ),
         )
-        for heading, body in sections:
-            ttk.Label(content, text=heading, style="HelpHeading.TLabel").pack(
-                anchor="w", pady=(0, 2)
+        for heading, items in sections:
+            sections_layout.addWidget(
+                self._help_label(heading, object_name="helpHeading")
             )
-            ttk.Label(
-                content,
-                text=body,
-                style="HelpBody.TLabel",
-                wraplength=510,
-                justify=LEFT,
-            ).pack(anchor="w", fill=X, pady=(0, 9))
+            sections_layout.addSpacing(4)
+            for item in items:
+                add_help_text(item)
+            sections_layout.addSpacing(8)
 
-        help_actions = ttk.Frame(content)
-        help_actions.pack(fill=X, pady=(4, 0))
-        ttk.Button(
-            help_actions,
-            text="Legal notices",
-            style="Accent.TButton",
-            command=self.show_legal_notices,
-            takefocus=False,
-        ).pack(side=LEFT, fill=X, expand=True, padx=(0, 4))
-        ttk.Button(
-            help_actions,
-            text="Close",
-            command=self._close_help,
-            takefocus=False,
-        ).pack(side=RIGHT, fill=X, expand=True, padx=(4, 0))
+        sections_layout.addWidget(
+            self._help_label("About and license", object_name="helpHeading")
+        )
+        sections_layout.addSpacing(4)
+        add_help_text(f"Originally created by {APP_AUTHOR}")
+        project_link = QLabel(
+            (
+                f'<a href="{PROJECT_URL}" '
+                f'style="color: {COLORS["accent_hover"]}; text-decoration: none;">'
+                f"Original project: {PROJECT_URL}</a>"
+            ),
+            help_sections,
+        )
+        project_link.setObjectName("helpLink")
+        project_link.setTextFormat(Qt.TextFormat.RichText)
+        project_link.setTextInteractionFlags(
+            Qt.TextInteractionFlag.LinksAccessibleByMouse
+        )
+        project_link.setOpenExternalLinks(False)
+        project_link.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        project_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        project_link.setAccessibleName("Open source repository")
+        project_link.linkActivated.connect(
+            lambda _url: self.open_source_repository()
+        )
+        self._help_project_link = project_link
+        add_help_item(project_link)
+        add_help_text(f"License: {LICENSE_NAME}")
+        sections_layout.addSpacing(12)
 
-        dialog.update_idletasks()
-        apply_dark_title_bar(dialog)
-        width = 560
-        height = max(530, dialog.winfo_reqheight())
-        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - 560) // 2)
-        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
-        dialog.geometry(f"{width}x{height}+{x}+{y}")
-        dialog.deiconify()
+        help_scroll.setWidget(help_sections)
+        content.addWidget(help_scroll, 1)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        actions.addWidget(
+            self._dialog_button(
+                "Legal notices",
+                self.show_legal_notices,
+                role="accent",
+            )
+        )
+        actions.addWidget(self._dialog_button("Close", dialog.close))
+        content.addSpacing(12)
+        content.addLayout(actions)
+
+        apply_variable_font_axes(dialog)
+        dialog.show()
+        QTimer.singleShot(0, lambda: apply_dark_title_bar(dialog))
 
     def _close_help(self) -> None:
-        if self._help_window is not None and self._help_window.winfo_exists():
-            self._help_window.destroy()
-        self._help_window = None
+        if self._help_window is not None:
+            self._help_window.close()
 
     def show_legal_notices(self) -> None:
-        if self._legal_window is not None and self._legal_window.winfo_exists():
-            self._legal_window.lift()
+        if self._legal_window is not None:
+            self._legal_window.raise_()
+            self._legal_window.activateWindow()
             return
 
-        dialog = Toplevel(self.root)
+        dialog = QDialog(self)
         self._legal_window = dialog
-        dialog.withdraw()
-        dialog.title(f"{APP_NAME} - Legal Notices")
-        dialog.configure(background=COLORS["window"])
-        dialog.minsize(620, 450)
-        dialog.transient(self.root)
-        dialog.protocol("WM_DELETE_WINDOW", self._close_legal_notices)
-        dialog.bind("<Escape>", lambda _event: self._close_legal_notices())
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.setWindowTitle(f"{APP_NAME} - Legal Notices")
+        dialog.setWindowIcon(self.windowIcon())
+        dialog.setMinimumSize(620, 450)
+        dialog.resize(720, 600)
+        dialog.finished.connect(lambda _result: setattr(self, "_legal_window", None))
 
-        content = ttk.Frame(dialog, padding=(22, 18))
-        content.pack(fill=BOTH, expand=True)
-        ttk.Label(content, text="Legal Notices", style="HelpTitle.TLabel").pack(
-            anchor="w",
-        )
-        ttk.Label(
-            content,
-            text=(
+        content = QVBoxLayout(dialog)
+        content.setContentsMargins(22, 18, 22, 18)
+        content.setSpacing(0)
+        content.addWidget(self._help_label("Legal Notices", object_name="helpTitle"))
+        content.addSpacing(8)
+        content.addWidget(
+            self._help_label(
                 f"Copyright (C) 2026 {APP_AUTHOR}\n"
                 f"Licensed under {LICENSE_NAME}.\n"
                 "This program comes with absolutely no warranty. You may redistribute "
-                "and modify it under the terms shown here."
-            ),
-            style="HelpBody.TLabel",
-            wraplength=660,
-            justify=LEFT,
-        ).pack(anchor="w", fill=X, pady=(8, 2))
-        ttk.Button(
-            content,
-            text=f"Open source repository  ·  {PROJECT_URL}",
-            style="UtilityLink.TButton",
-            command=self.open_source_repository,
-            takefocus=False,
-        ).pack(anchor="w", pady=(0, 10))
-
-        document_selector = ttk.Frame(content)
-        document_selector.pack(fill=X, pady=(0, 8))
-        document_frame = ttk.Frame(content, style="FieldShell.TFrame")
-        document_frame.pack(fill=BOTH, expand=True)
-        document_text = Text(
-            document_frame,
-            background=COLORS["field"],
-            foreground=COLORS["text"],
-            selectbackground=COLORS["selection"],
-            selectforeground=COLORS["text"],
-            borderwidth=0,
-            highlightthickness=0,
-            relief="flat",
-            wrap="word",
-            padx=14,
-            pady=12,
-            font=("Segoe UI", 9),
-            state="disabled",
+                "and modify it under the terms shown here.",
+                object_name="helpBody",
+                wrap=True,
+            )
         )
-        document_scrollbar = ttk.Scrollbar(
-            document_frame,
-            orient="vertical",
-            command=document_text.yview,
+        source_button = self._dialog_button(
+            f"Open source repository  ·  {PROJECT_URL}",
+            self.open_source_repository,
+            role="link",
         )
-        document_text.configure(yscrollcommand=document_scrollbar.set)
-        document_scrollbar.pack(side=RIGHT, fill=Y)
-        document_text.pack(side=LEFT, fill=BOTH, expand=True)
+        content.addWidget(source_button, 0, Qt.AlignmentFlag.AlignLeft)
+        content.addSpacing(8)
 
-        document_buttons: dict[str, ttk.Button] = {}
+        selector = QHBoxLayout()
+        selector.setSpacing(6)
+        document_buttons: dict[str, QPushButton] = {}
+        for title, _filename in LEGAL_NOTICE_FILES:
+            button = self._dialog_button(title, lambda: None)
+            selector.addWidget(button)
+            document_buttons[title] = button
+        content.addLayout(selector)
+        content.addSpacing(8)
+
+        document_text = QPlainTextEdit(dialog)
+        document_text.setReadOnly(True)
+        document_text.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        content.addWidget(document_text, 1)
+        content.addSpacing(12)
+        content.addWidget(self._dialog_button("Close", dialog.close))
 
         def show_document(title: str) -> None:
-            document_text.configure(state="normal")
-            document_text.delete("1.0", "end")
-            document_text.insert("1.0", self._legal_documents[title])
-            document_text.configure(state="disabled")
-            document_text.yview_moveto(0)
+            document_text.setPlainText(self._legal_documents[title])
+            document_text.verticalScrollBar().setValue(0)
             for button_title, button in document_buttons.items():
-                button.configure(
-                    style="Accent.TButton" if button_title == title else "TButton"
+                self._set_button_style(
+                    button,
+                    role="accent" if button_title == title else "",
                 )
 
-        for title, _filename in LEGAL_NOTICE_FILES:
-            button = ttk.Button(
-                document_selector,
-                text=title,
-                command=lambda document_title=title: show_document(document_title),
-                takefocus=False,
+        for title, button in document_buttons.items():
+            button.clicked.disconnect()
+            button.clicked.connect(
+                lambda _checked=False, document_title=title: show_document(
+                    document_title
+                )
             )
-            button.pack(side=LEFT, fill=X, expand=True, padx=(0, 6))
-            document_buttons[title] = button
-
-        ttk.Button(
-            content,
-            text="Close",
-            command=self._close_legal_notices,
-            takefocus=False,
-        ).pack(fill=X, pady=(12, 0))
 
         self._legal_text = document_text
         self._legal_buttons = document_buttons
         show_document("License")
-        dialog.update_idletasks()
-        apply_dark_title_bar(dialog)
-        width = 720
-        height = 600
-        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
-        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
-        dialog.geometry(f"{width}x{height}+{x}+{y}")
-        dialog.deiconify()
+        apply_variable_font_axes(dialog)
+        dialog.show()
+        QTimer.singleShot(0, lambda: apply_dark_title_bar(dialog))
 
     def _close_legal_notices(self) -> None:
-        if self._legal_window is not None and self._legal_window.winfo_exists():
-            self._legal_window.destroy()
-        self._legal_window = None
+        if self._legal_window is not None:
+            self._legal_window.close()
 
     def open_source_repository(self) -> None:
         try:
@@ -548,6 +848,20 @@ class ToneSlapperWindow:
             and bool(self.active_operation and self.active_operation.startswith("oem-"))
         )
 
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._force_close:
+            event.accept()
+            return
+        if self._close_is_blocked():
+            messagebox.showwarning(
+                APP_NAME,
+                CLOSE_BLOCKED_TEXT,
+                parent=self,
+            )
+            event.ignore()
+            return
+        event.accept()
+
     def _request_close(self) -> None:
         if self._close_is_blocked():
             messagebox.showwarning(
@@ -558,18 +872,6 @@ class ToneSlapperWindow:
             return
         self.root.destroy()
 
-    def _set_write_warning_visible(self, visible: bool) -> None:
-        if visible:
-            if not self.write_warning_label.winfo_manager():
-                self.write_warning_label.pack(
-                    fill=X,
-                    pady=(10, 0),
-                    before=self.upload_button,
-                )
-            return
-        if self.write_warning_label.winfo_manager():
-            self.write_warning_label.pack_forget()
-
     def donate(self) -> None:
         try:
             opened = webbrowser.open(DONATE_URL, new=2)
@@ -579,329 +881,232 @@ class ToneSlapperWindow:
             messagebox.showerror(
                 APP_NAME,
                 f"Could not open the donation page. Visit:\n\n{DONATE_URL}",
+                parent=self,
             )
 
-    def _build_button_pressed(self, _event=None):
-        if not self.busy and self.target_profile_id is None:
-            self._show_flying_tip(self.build_button, "select target device")
-            return "break"
-        return None
-
-    def _open_button_pressed(self, _event=None):
-        if not self.busy and self.target_profile_id is None:
-            self._show_flying_tip(self.validate_button, "select target device")
-            return "break"
-        return None
-
-    def _upload_button_pressed(self, _event=None):
+    def _build_button_pressed(self) -> None:
         if self.busy:
-            return "break"
+            return
+        if self.target_profile_id is None:
+            self._show_flying_tip(self.build_button, "select target device")
+            return
+        if not self.assignments:
+            self._show_flying_tip(self.build_button, "choose a sound first")
+            return
+        self.build()
+
+    def _open_button_pressed(self) -> None:
+        if self.busy:
+            return
+        if self.target_profile_id is None:
+            self._show_flying_tip(self.validate_button, "select target device")
+            return
+        self.open_existing()
+
+    def _clear_loaded_package(self) -> None:
+        if self.busy or self.last_build is None:
+            return
+        self._invalidate_build()
+
+    def _upload_button_pressed(self) -> None:
+        if self.busy:
+            return
         if self.last_build is None:
             self._show_flying_tip(self.upload_button, "build or open first")
-            return "break"
+            return
         if self._device_identifier() is None or self._selected_profile_id() is None:
             self._show_flying_tip(self.upload_button, "select connected device")
-            return "break"
-        return None
+            return
+        self.upload()
 
-    def _recovery_button_pressed(self, _event=None):
+    def _recovery_button_pressed(self) -> None:
         if self.busy:
-            return "break"
+            return
         if self._device_identifier() is None or self._selected_profile_id() is None:
             self._show_flying_tip(self.recovery_button, "select connected device")
-            return "break"
-        return None
+            return
+        self.restore()
 
-    def _show_flying_tip(self, anchor, text: str) -> None:
-        self._dismiss_flying_tip()
-        self.root.update_idletasks()
-
-        if self._tip_canvas is None:
-            self._tip_canvas = Canvas(
-                self.root,
-                background="#000000",
-                borderwidth=0,
-                highlightthickness=0,
-                relief="flat",
-                takefocus=False,
-            )
-            self._tip_canvas.bind("<Button-1>", lambda _event: "break")
-
-        tip = self._tip_canvas
-        width = self._tip_font.measure(text) + 16
-        height = self._tip_font.metrics("linespace") + 6
-        x = (
-            anchor.winfo_rootx()
-            - self.root.winfo_rootx()
-            + (anchor.winfo_width() - width) // 2
-        )
-        start_y = anchor.winfo_rooty() - self.root.winfo_rooty() - height + 20
-        travel = 30
-        frames = 36
-        interval_ms = 45
-
-        def blend(start: str, end: str, amount: float) -> str:
-            start_rgb = tuple(int(start[index : index + 2], 16) for index in (1, 3, 5))
-            end_rgb = tuple(int(end[index : index + 2], 16) for index in (1, 3, 5))
-            values = tuple(
-                round(start_value + (end_value - start_value) * amount)
-                for start_value, end_value in zip(start_rgb, end_rgb)
-            )
-            return "#{:02x}{:02x}{:02x}".format(*values)
-
-        def animate(frame: int = 0) -> None:
-            self._tip_job = None
-            if self._tip_canvas is not tip or not tip.winfo_exists():
-                return
-            progress = frame / frames
-            y = start_y - round(travel * progress)
-            fade_start = 0.68
-            fade_progress = max(0.0, (progress - fade_start) / (1.0 - fade_start))
-            background = blend("#000000", COLORS["window"], fade_progress)
-            foreground = blend("#ffffff", COLORS["window"], fade_progress)
-            tip.configure(background=background)
-            tip.delete("all")
-            tip.create_text(
-                width / 2,
-                height / 2,
-                text=text,
-                fill=foreground,
-                font=self._tip_font,
-            )
-            tip.place(x=x, y=y, width=width, height=height)
-            tip.tk.call("raise", tip._w)
-            if frame >= frames:
-                self._dismiss_flying_tip()
-                return
-            self._tip_job = self.root.after(interval_ms, animate, frame + 1)
-
-        animate()
+    def _show_flying_tip(self, anchor: QWidget, text: str) -> None:
+        self._flying_tip.show_for(anchor, text)
 
     def _dismiss_flying_tip(self) -> None:
-        if self._tip_job is not None:
-            self.root.after_cancel(self._tip_job)
-            self._tip_job = None
-        if self._tip_canvas is not None:
-            self._tip_canvas.place_forget()
-            self._tip_canvas.delete("all")
-
-    def _schedule_prompt_refresh(self, _event=None) -> None:
-        if self._prompt_refresh_job is not None:
-            self.root.after_cancel(self._prompt_refresh_job)
-        self._prompt_refresh_job = self.root.after(60, self._refresh_prompt_rows)
-
-    def _prompt_scroll_changed(self, first: str, last: str) -> None:
-        self.prompt_scrollbar.set(first, last)
-        self.root.after_idle(self._position_row_controls)
-
-    def _prompt_mousewheel(self, event):
-        if len(self.prompt_tree.get_children()) <= 11:
-            return "break"
-        self.prompt_tree.yview_scroll(-1 if event.delta > 0 else 1, "units")
-        return "break"
-
-    def _update_prompt_scrollbar(self) -> None:
-        needs_scrollbar = len(self.prompt_tree.get_children()) > 11
-        if needs_scrollbar and not self.prompt_scrollbar.winfo_manager():
-            self.prompt_scrollbar.pack(side=RIGHT, fill=Y)
-        elif not needs_scrollbar and self.prompt_scrollbar.winfo_manager():
-            self.prompt_scrollbar.pack_forget()
+        self._flying_tip.dismiss()
 
     def _truncate_path(self, path: Path) -> str:
-        text = str(path)
-        max_width = max(100, int(self.prompt_tree.column("source", "width")) - 22)
-        if self._tree_font.measure(text) <= max_width:
-            return text
-        for start in range(1, len(text)):
-            candidate = "…" + text[start:]
-            if self._tree_font.measure(candidate) <= max_width:
-                return candidate
-        return "…" + path.name[-12:]
+        width = max(100, self.prompt_tree.columnWidth(2) - 22)
+        metrics = QFontMetrics(self.prompt_tree.font())
+        return metrics.elidedText(
+            str(path),
+            Qt.TextElideMode.ElideLeft,
+            width,
+        )
+
+    def _refresh_package_text(self, value: str | None = None) -> None:
+        text = self.output_var.get() if value is None else value
+        loaded_path = (
+            str(self.last_build.output)
+            if self.last_build is not None
+            else None
+        )
+        if loaded_path is not None and text == loaded_path:
+            width = max(100, self.validate_button.width() - 20)
+            metrics = QFontMetrics(self.validate_button.font())
+            self.validate_button.setText(
+                metrics.elidedText(
+                    text,
+                    Qt.TextElideMode.ElideMiddle,
+                    width,
+                )
+            )
+            self.validate_button.setToolTip(text)
+            return
+        self.validate_button.setText(text)
+        self.validate_button.setToolTip("")
+
+    def _prompt_item(
+        self,
+        text: str,
+        alignment: Qt.AlignmentFlag,
+    ) -> QTableWidgetItem:
+        item = QTableWidgetItem(text)
+        item.setTextAlignment(alignment)
+        item.setFlags(
+            Qt.ItemFlag.ItemIsEnabled
+            | Qt.ItemFlag.ItemNeverHasChildren
+        )
+        return item
 
     def _refresh_prompt_rows(self) -> None:
-        self._prompt_refresh_job = None
         self._hovered_prompt = None
-        for button in self._reset_buttons.values():
-            button.destroy()
         self._reset_buttons.clear()
-        for label in self._source_labels.values():
-            label.destroy()
-        self._source_labels.clear()
-        self.prompt_tree.delete(*self.prompt_tree.get_children())
         prompt_labels = self._prompt_labels()
+        self.prompt_tree.clearContents()
+        self.prompt_tree.setRowCount(0)
         if not prompt_labels:
-            if self.prompt_tree.winfo_manager():
-                self.prompt_tree.pack_forget()
-            if self.prompt_scrollbar.winfo_manager():
-                self.prompt_scrollbar.pack_forget()
-            if not self.prompt_empty_label.winfo_manager():
-                self.prompt_empty_label.pack(fill=BOTH, expand=True)
+            self.prompt_stack.setCurrentWidget(self.prompt_empty_label)
             return
-        if self.prompt_empty_label.winfo_manager():
-            self.prompt_empty_label.pack_forget()
-        if not self.prompt_tree.winfo_manager():
-            self.prompt_tree.pack(side=LEFT, fill=BOTH, expand=True)
+
+        self.prompt_tree.setRowCount(len(prompt_labels))
+        self.prompt_stack.setCurrentWidget(self.prompt_tree)
         for index, label in enumerate(prompt_labels):
-            custom = index in self.assignments
-            self.prompt_tree.insert(
-                "",
-                "end",
-                iid=str(index),
-                values=(f"{index:02d}", label, "", ""),
-                tags=("custom",) if custom else (),
+            self.prompt_tree.setRowHeight(index, 30)
+            self.prompt_tree.setItem(
+                index,
+                0,
+                self._prompt_item(
+                    f"{index:02d}",
+                    Qt.AlignmentFlag.AlignCenter,
+                ),
             )
-        self.prompt_tree.selection_remove(*self.prompt_tree.selection())
-        self._update_prompt_scrollbar()
-        self.root.after_idle(self._position_row_controls)
+            self.prompt_tree.setItem(
+                index,
+                1,
+                self._prompt_item(
+                    label,
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                ),
+            )
+            source = self.assignments.get(index)
+            source_item = self._prompt_item(
+                self._truncate_path(source) if source is not None else "OEM English",
+                (
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+                    if source is not None
+                    else Qt.AlignmentFlag.AlignCenter
+                ),
+            )
+            if source is not None:
+                source_item.setToolTip(str(source))
+            self.prompt_tree.setItem(index, 2, source_item)
+            reset_item = self._prompt_item("", Qt.AlignmentFlag.AlignCenter)
+            self.prompt_tree.setItem(index, 3, reset_item)
+            if source is not None:
+                reset_button = ResetButton(self.prompt_tree)
+                reset_button.clicked.connect(
+                    lambda _checked=False, prompt_index=index: self._reset_prompt(
+                        prompt_index
+                    )
+                )
+                reset_button.hovered.connect(
+                    lambda hovered, prompt_index=index: self._set_prompt_hover(
+                        prompt_index if hovered else None
+                    )
+                )
+                self.prompt_tree.setCellWidget(index, 3, reset_button)
+                self._reset_buttons[index] = reset_button
+            self._refresh_prompt_row_style(index)
 
-    def _source_style(self, index: int) -> str:
-        custom = index in self.assignments
-        hovered = index == self._hovered_prompt
-        return f"{'Custom' if custom else 'OEM'}Source{'Hover' if hovered else ''}.TLabel"
+    def _refresh_source_texts(self) -> None:
+        for index, path in self.assignments.items():
+            item = self.prompt_tree.item(index, 2)
+            if item is not None:
+                item.setText(self._truncate_path(path))
 
-    def _position_row_controls(self) -> None:
-        if not self.prompt_tree.winfo_exists() or not self.prompt_tree.winfo_manager():
+    def _prompt_row_hovered(self, row: int) -> None:
+        self._set_prompt_hover(row if row >= 0 else None)
+
+    def _prompt_cell_clicked(self, row: int, column: int) -> None:
+        if self.busy or self.target_profile_id is None:
             return
-        for button in self._reset_buttons.values():
-            button.destroy()
-        self._reset_buttons.clear()
-        for label in self._source_labels.values():
-            label.destroy()
-        self._source_labels.clear()
-        for index in range(len(self._prompt_labels())):
-            source_bounds = self.prompt_tree.bbox(str(index), "source")
-            if not source_bounds:
-                continue
-            source_x, source_y, source_width, source_height = source_bounds
-            source_text = (
-                self._truncate_path(self.assignments[index])
-                if index in self.assignments
-                else "OEM English"
-            )
-            source_label = ttk.Label(
-                self.prompt_tree,
-                text=source_text,
-                style=self._source_style(index),
-                anchor="w" if index in self.assignments else "center",
-                cursor="arrow" if self.busy else "hand2",
-            )
-            source_label.place(
-                x=source_x + 1,
-                y=source_y + 1,
-                width=max(1, source_width - 2),
-                height=max(1, source_height - 2),
-            )
-            source_label.bind(
-                "<Button-1>",
-                lambda _event, prompt_index=index: self._source_click(prompt_index),
-            )
-            source_label.bind(
-                "<Enter>",
-                lambda _event, prompt_index=index: self._set_prompt_hover(prompt_index),
-            )
-            source_label.bind("<Leave>", lambda _event: self._set_prompt_hover(None))
-            source_label.bind("<MouseWheel>", self._prompt_mousewheel)
-            self._source_labels[index] = source_label
+        if column == 3 and row in self.assignments:
+            self._reset_prompt(row)
+            return
+        self._choose_audio_for(row)
 
-        for index in sorted(self.assignments):
-            bounds = self.prompt_tree.bbox(str(index), "reset")
-            if not bounds:
-                continue
-            x, y, width, height = bounds
-            button = ResetButton(
-                self.prompt_tree,
-                command=lambda prompt_index=index: self._reset_prompt(prompt_index),
-            )
-            button.place(x=x + 4, y=y + 3, width=max(1, width - 8), height=max(1, height - 6))
-            button.set_enabled(not self.busy)
-            button.bind(
-                "<Enter>",
-                lambda _event, prompt_index=index: self._set_prompt_hover(prompt_index),
-                add="+",
-            )
-            button.bind("<Leave>", lambda _event: self._set_prompt_hover(None), add="+")
-            button.bind("<MouseWheel>", self._prompt_mousewheel, add="+")
-            button.set_row_hover(index == self._hovered_prompt)
-            self._reset_buttons[index] = button
-
-    def _source_click(self, index: int):
-        if not self.busy and self.target_profile_id is not None:
-            self._choose_audio_for(index)
-        return "break"
-
-    def _prompt_click(self, event):
-        region = self.prompt_tree.identify_region(event.x, event.y)
-        if region == "separator":
-            return "break"
-        if self.busy or region != "cell":
-            return "break"
-        row = self.prompt_tree.identify_row(event.y)
-        column = self.prompt_tree.identify_column(event.x)
-        if not row:
-            return "break"
-        index = int(row)
-        if column == "#4":
-            if index in self.assignments:
-                self._reset_prompt(index)
-            else:
-                self._choose_audio_for(index)
-            return "break"
-        if column in {"#1", "#2", "#3"}:
-            self._choose_audio_for(index)
-            return "break"
-        return "break"
-
-    def _block_column_resize(self, event):
-        return "break"
-
-    def _prompt_motion(self, event) -> None:
-        row = self.prompt_tree.identify_row(event.y)
-        column = self.prompt_tree.identify_column(event.x)
-        region = self.prompt_tree.identify_region(event.x, event.y)
-        hovered = int(row) if not self.busy and region == "cell" and row else None
-        self._set_prompt_hover(hovered)
-        clickable = (
-            not self.busy
-            and region == "cell"
-            and bool(row)
-            and column in {"#1", "#2", "#3", "#4"}
+    def _refresh_prompt_row_style(self, index: int) -> None:
+        hovered = not self.busy and index == self._hovered_prompt
+        background = (
+            QColor(COLORS["surface_hover"])
+            if hovered
+            else QColor(0, 0, 0, 0)
         )
-        self.prompt_tree.configure(cursor="hand2" if clickable else "")
-
-    def _prompt_leave(self, _event) -> None:
-        self._set_prompt_hover(None)
-        self.prompt_tree.configure(cursor="")
+        for column in range(self.prompt_tree.columnCount()):
+            item = self.prompt_tree.item(index, column)
+            if item is None:
+                continue
+            item.setBackground(QBrush(background))
+            if self.busy:
+                foreground = COLORS["disabled"]
+            elif column == 2 and index in self.assignments:
+                foreground = "#ffad98"
+            else:
+                foreground = COLORS["text"]
+            item.setForeground(QBrush(QColor(foreground)))
+        reset_button = self._reset_buttons.get(index)
+        if reset_button is not None:
+            reset_button.set_row_hover(hovered)
+            reset_button.set_enabled(not self.busy)
 
     def _set_prompt_hover(self, index: int | None) -> None:
+        if self.busy:
+            index = None
         if index == self._hovered_prompt:
             return
         previous = self._hovered_prompt
         self._hovered_prompt = index
         for prompt_index in (previous, index):
-            if prompt_index is None or not self.prompt_tree.exists(str(prompt_index)):
-                continue
-            tags = []
-            if prompt_index in self.assignments:
-                tags.append("custom")
-            if prompt_index == index:
-                tags.append("hover")
-            self.prompt_tree.item(str(prompt_index), tags=tuple(tags))
-            source_label = self._source_labels.get(prompt_index)
-            if source_label is not None:
-                source_label.configure(style=self._source_style(prompt_index))
-            reset_button = self._reset_buttons.get(prompt_index)
-            if reset_button is not None:
-                reset_button.set_row_hover(prompt_index == index)
+            if prompt_index is not None and 0 <= prompt_index < self.prompt_tree.rowCount():
+                self._refresh_prompt_row_style(prompt_index)
 
     def _choose_audio_for(self, index: int) -> None:
         prompt_labels = self._prompt_labels()
         if not 0 <= index < len(prompt_labels):
             return
         selected = filedialog.askopenfilename(
+            parent=self,
             title=f"Audio for {prompt_labels[index]}",
             filetypes=AUDIO_TYPES,
         )
         if selected:
+            if Path(selected).suffix.casefold() == ".bin":
+                messagebox.showerror(
+                    APP_NAME,
+                    "The audio source must be a regular audio file. To open a complete "
+                    "sound-pack .BIN file, use Open sound pack below the prompt list.",
+                    parent=self,
+                )
+                return
             self.assignments[index] = Path(selected)
             self._invalidate_build()
             self._refresh_prompt_rows()
@@ -917,15 +1122,21 @@ class ToneSlapperWindow:
         if self._build_status_job is not None:
             self.root.after_cancel(self._build_status_job)
             self._build_status_job = None
-            self.build_button.configure(text=self.BUILD_TEXT)
+            self.build_button.setText(self.BUILD_TEXT)
         self.last_build = None
         self.build_dirty = True
         self.output_var.set(self.OPEN_TEXT)
         self._update_buttons()
 
+    def _combo_changed(self, display: str) -> None:
+        self.device_var.set(display)
+        if display:
+            self._device_selected()
+        else:
+            self._update_buttons()
+
     def _device_selected(self, _event=None) -> None:
         self._reset_upload_success()
-        self._clear_device_text_selection()
         display = self.device_var.get()
         model = self.device_models.get(display)
         profile = resolve_device_profile(model)
@@ -936,14 +1147,6 @@ class ToneSlapperWindow:
             self.assignments.clear()
             self.target_profile_id = profile.profile_id
             self.target_model = profile.display_name
-            self.target_var.set(f"Build target: {profile.display_name}")
-            if not self.target_label.winfo_manager():
-                self.target_label.pack(
-                    fill=X,
-                    padx=14,
-                    pady=(1, 8),
-                    before=self.prompt_card,
-                )
             self._refresh_prompt_rows()
             self._invalidate_build()
             return
@@ -952,9 +1155,6 @@ class ToneSlapperWindow:
     def _prompt_labels(self) -> tuple[str, ...]:
         profile = get_device_profile(self.target_profile_id)
         return profile.prompt_labels if profile is not None else ()
-
-    def _clear_device_text_selection(self, _event=None) -> None:
-        self.root.after_idle(self.device_combo.selection_clear)
 
     def _run_background(
         self,
@@ -974,19 +1174,18 @@ class ToneSlapperWindow:
         self.active_operation = operation_name
         self.active_total_packets = total_packets
         if operation_name == "scan":
-            self.scan_button.configure(text="Scanning…")
+            self.scan_button.setText("Scanning…")
         elif operation_name == "build":
-            self.build_button.configure(text="Preparing audio…")
+            self.build_button.setText("Preparing audio…")
         elif operation_name == "open":
             self.output_var.set("Opening and validating…")
         elif operation_name.startswith("oem-"):
             if self._oem_context == "build":
-                self.build_button.configure(text="Downloading OEM...")
+                self.build_button.setText("Downloading OEM…")
             else:
-                self.upload_button.begin("Downloading OEM...")
+                self.upload_button.begin("Downloading OEM…")
         elif operation_name in {"upload", "recovery"}:
             self.upload_button.begin("Verifying headphones…")
-        self._set_write_warning_visible(operation_name in {"upload", "recovery"})
         self._update_buttons()
 
         def worker() -> None:
@@ -994,9 +1193,9 @@ class ToneSlapperWindow:
                 result = operation()
             except Exception as error:
                 traceback.print_exc()
-                self.root.after(0, lambda error=error: self._finish_error(error))
+                self._signals.failed.emit(error)
             else:
-                self.root.after(0, lambda: self._finish_success(result, success))
+                self._signals.completed.emit(result, success)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1012,7 +1211,7 @@ class ToneSlapperWindow:
             return
         if operation_name in {"upload", "recovery"}:
             self.upload_button.set_progress(1.0, "Upload failed")
-        messagebox.showerror(APP_NAME, detail)
+        messagebox.showerror(APP_NAME, detail, parent=self)
         self._reset_operation_ui()
 
     def _finish_success(self, result, callback) -> None:
@@ -1026,10 +1225,11 @@ class ToneSlapperWindow:
         self.busy = False
         self.active_operation = None
         self.active_total_packets = 0
-        self._set_write_warning_visible(False)
-        self.scan_button.configure(text=self.SCAN_TEXT)
-        self.build_button.configure(text=self.BUILD_TEXT)
-        self.output_var.set(self.last_build.output if self.last_build else self.OPEN_TEXT)
+        self.scan_button.setText(self.SCAN_TEXT)
+        self.build_button.setText(self.BUILD_TEXT)
+        self.output_var.set(
+            str(self.last_build.output) if self.last_build else self.OPEN_TEXT
+        )
         if not preserve_upload_status:
             self.upload_button.reset(enabled=False)
         self._update_buttons()
@@ -1041,18 +1241,18 @@ class ToneSlapperWindow:
         self.upload_button.reset(enabled=False)
 
     def _thread_progress(self, message: str) -> None:
-        self.root.after(0, lambda: self._apply_progress(message))
+        self._signals.progress.emit(message)
 
     def _apply_progress(self, message: str) -> None:
         if self.active_operation == "build":
             if message.startswith("Saving verified OEM"):
-                self.build_button.configure(text="Saving OEM container...")
+                self.build_button.setText("Saving OEM container…")
             elif message.startswith("Converting prompt"):
-                self.build_button.configure(text="Converting audio…")
+                self.build_button.setText("Converting audio…")
             elif message.startswith("Rebuilding"):
-                self.build_button.configure(text="Building container…")
+                self.build_button.setText("Building container…")
             elif message.startswith("Container validated"):
-                self.build_button.configure(text="Validated")
+                self.build_button.setText("Validated")
             return
         if self.active_operation not in {"upload", "recovery"}:
             return
@@ -1084,18 +1284,30 @@ class ToneSlapperWindow:
             model = device.name or "Unknown"
             if resolve_device_profile(model) is None:
                 continue
-            display = f"{model} | {device.address} | Connected"
+            display = model
+            duplicate_number = 2
+            while display in self.devices:
+                display = f"{model} ({duplicate_number})"
+                duplicate_number += 1
             values.append(display)
             self.devices[display] = device.address
             self.device_models[display] = model
-        self.device_combo["values"] = values
-        self.device_var.set(values[0] if values else "")
-        if values:
+
+        self.device_combo.blockSignals(True)
+        self.device_combo.clear()
+        self.device_combo.addItems(values)
+        self.device_combo.blockSignals(False)
+        display = values[0] if values else ""
+        self.device_var.set(display)
+        if display:
+            self.device_combo.setCurrentText(display)
             self._device_selected()
-        if not values:
+        else:
+            self._update_buttons()
             messagebox.showinfo(
                 APP_NAME,
                 f"No connected {TUNE_720BT_PROFILE.display_name} was found.",
+                parent=self,
             )
 
     def _acquire_oem(
@@ -1154,73 +1366,60 @@ class ToneSlapperWindow:
         message: str,
         continue_text: str,
     ) -> str | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{APP_NAME} - {title}")
+        dialog.setWindowIcon(self.windowIcon())
+        dialog.setModal(True)
+        dialog.setFixedWidth(550)
         result: dict[str, str | None] = {"value": None}
-        dialog = Toplevel(self.root)
-        dialog.withdraw()
-        dialog.title(f"{APP_NAME} - {title}")
-        dialog.configure(background=COLORS["window"])
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
+
+        content = QVBoxLayout(dialog)
+        content.setContentsMargins(22, 18, 22, 18)
+        content.setSpacing(0)
+        content.addWidget(self._help_label(title, object_name="helpTitle"))
+        content.addSpacing(12)
+        content.addWidget(
+            self._help_label(
+                message,
+                object_name="helpBody",
+                wrap=True,
+            )
+        )
+        content.addSpacing(18)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
 
         def close(value: str | None = None) -> None:
             result["value"] = value
-            dialog.destroy()
+            dialog.accept() if value else dialog.reject()
 
-        dialog.protocol("WM_DELETE_WINDOW", close)
-        dialog.bind("<Escape>", lambda _event: close())
-        content = ttk.Frame(dialog, padding=(22, 18))
-        content.pack(fill=BOTH, expand=True)
-        ttk.Label(content, text=title, style="HelpTitle.TLabel").pack(
-            anchor="w",
-            pady=(0, 12),
+        buttons.addWidget(
+            self._dialog_button(
+                continue_text,
+                lambda: close("continue"),
+                role="accent",
+            )
         )
-        ttk.Label(
-            content,
-            text=message,
-            style="HelpBody.TLabel",
-            wraplength=500,
-            justify=LEFT,
-        ).pack(anchor="w", fill=X, pady=(0, 18))
-        buttons = ttk.Frame(content)
-        buttons.pack(fill=X)
-        ttk.Button(
-            buttons,
-            text="Cancel",
-            style="Ghost.TButton",
-            command=close,
-            takefocus=False,
-        ).pack(side=RIGHT)
-        ttk.Button(
-            buttons,
-            text=continue_text,
-            style="Accent.TButton",
-            command=lambda: close("continue"),
-            takefocus=False,
-        ).pack(side=RIGHT, padx=(0, 8))
-
-        dialog.update_idletasks()
-        apply_dark_title_bar(dialog)
-        width = 550
-        height = max(230, dialog.winfo_reqheight())
-        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
-        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
-        dialog.geometry(f"{width}x{height}+{x}+{y}")
-        dialog.deiconify()
-        dialog.grab_set()
-        self.root.wait_window(dialog)
+        buttons.addWidget(
+            self._dialog_button(
+                "Cancel",
+                lambda: close(),
+                role="ghost",
+            )
+        )
+        content.addLayout(buttons)
+        apply_variable_font_axes(dialog)
+        QTimer.singleShot(0, lambda: apply_dark_title_bar(dialog))
+        dialog.exec()
         return result["value"]
 
     def _show_manual_oem_recovery(self, detail: str) -> None:
         selected: dict[str, Path | None] = {"path": None}
-        dialog = Toplevel(self.root)
-        dialog.withdraw()
-        dialog.title(f"{APP_NAME} - Manual OEM recovery")
-        dialog.configure(background=COLORS["window"])
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-
-        def close() -> None:
-            dialog.destroy()
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{APP_NAME} - Manual OEM recovery")
+        dialog.setWindowIcon(self.windowIcon())
+        dialog.setModal(True)
+        dialog.setFixedWidth(570)
 
         def open_github() -> None:
             try:
@@ -1238,65 +1437,56 @@ class ToneSlapperWindow:
             chosen = filedialog.askopenfilename(
                 parent=dialog,
                 title="Select the downloaded OEM file",
-                filetypes=[("OEM prompt container", "*.bin"), ("All files", "*.*")],
+                filetypes=[
+                    ("OEM prompt container", "*.bin"),
+                    ("All files", "*.*"),
+                ],
             )
             if chosen:
                 selected["path"] = Path(chosen)
-                dialog.destroy()
+                dialog.accept()
 
-        dialog.protocol("WM_DELETE_WINDOW", close)
-        dialog.bind("<Escape>", lambda _event: close())
-        content = ttk.Frame(dialog, padding=(22, 18))
-        content.pack(fill=BOTH, expand=True)
-        ttk.Label(
-            content,
-            text="Automatic OEM download failed",
-            style="HelpTitle.TLabel",
-        ).pack(anchor="w", pady=(0, 12))
-        ttk.Label(
-            content,
-            text=(
+        content = QVBoxLayout(dialog)
+        content.setContentsMargins(22, 18, 22, 18)
+        content.setSpacing(0)
+        content.addWidget(
+            self._help_label(
+                "Automatic OEM download failed",
+                object_name="helpTitle",
+            )
+        )
+        content.addSpacing(12)
+        content.addWidget(
+            self._help_label(
                 f"{detail}\n\n"
                 "Download the OEM file manually from the BT Tone Slapper GitHub "
-                "repository, then select the downloaded file."
-            ),
-            style="HelpBody.TLabel",
-            wraplength=520,
-            justify=LEFT,
-        ).pack(anchor="w", fill=X, pady=(0, 18))
-        buttons = ttk.Frame(content)
-        buttons.pack(fill=X)
-        ttk.Button(
-            buttons,
-            text="Cancel",
-            style="Ghost.TButton",
-            command=close,
-            takefocus=False,
-        ).pack(side=RIGHT)
-        ttk.Button(
-            buttons,
-            text="Select downloaded file",
-            style="Accent.TButton",
-            command=select_file,
-            takefocus=False,
-        ).pack(side=RIGHT, padx=(0, 8))
-        ttk.Button(
-            buttons,
-            text="Open GitHub",
-            command=open_github,
-            takefocus=False,
-        ).pack(side=LEFT)
-
-        dialog.update_idletasks()
-        apply_dark_title_bar(dialog)
-        width = 570
-        height = max(250, dialog.winfo_reqheight())
-        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
-        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - height) // 2)
-        dialog.geometry(f"{width}x{height}+{x}+{y}")
-        dialog.deiconify()
-        dialog.grab_set()
-        self.root.wait_window(dialog)
+                "repository, then select the downloaded file.",
+                object_name="helpBody",
+                wrap=True,
+            )
+        )
+        content.addSpacing(18)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self._dialog_button("Open GitHub", open_github))
+        buttons.addStretch(1)
+        buttons.addWidget(
+            self._dialog_button(
+                "Select downloaded file",
+                select_file,
+                role="accent",
+            )
+        )
+        buttons.addWidget(
+            self._dialog_button(
+                "Cancel",
+                dialog.reject,
+                role="ghost",
+            )
+        )
+        content.addLayout(buttons)
+        apply_variable_font_axes(dialog)
+        QTimer.singleShot(0, lambda: apply_dark_title_bar(dialog))
+        dialog.exec()
 
         chosen_path = selected["path"]
         if chosen_path is None:
@@ -1312,6 +1502,9 @@ class ToneSlapperWindow:
         if self.target_profile_id is None:
             self._show_flying_tip(self.build_button, "select target device")
             return
+        if not self.assignments:
+            self._show_flying_tip(self.build_button, "choose a sound first")
+            return
         self._acquire_oem(
             "build",
             self._build_with_oem,
@@ -1320,6 +1513,7 @@ class ToneSlapperWindow:
 
     def _build_with_oem(self, oem_image: OemImage) -> None:
         output = filedialog.asksaveasfilename(
+            parent=self,
             title="Save generated tone container",
             defaultextension=".bin",
             initialfile=(
@@ -1350,14 +1544,12 @@ class ToneSlapperWindow:
     def _build_complete(self, result: BuildResult) -> None:
         self.last_build = result
         self.build_dirty = False
-        self.output_var.set(result.output)
+        self.output_var.set(str(result.output))
         self.root.after_idle(self._show_build_success)
 
     def _show_build_success(self) -> None:
-        self.build_button.configure(
-            text="Build successful",
-            style="Success.TButton",
-        )
+        self.build_button.setText("Build successful")
+        self._set_button_style(self.build_button, role="success")
         self._build_status_job = self.root.after(
             self.BUILD_SUCCESS_MS,
             self._restore_build_text,
@@ -1366,7 +1558,7 @@ class ToneSlapperWindow:
     def _restore_build_text(self) -> None:
         self._build_status_job = None
         if self.active_operation != "build":
-            self.build_button.configure(text=self.BUILD_TEXT)
+            self.build_button.setText(self.BUILD_TEXT)
             self._update_buttons()
 
     def open_existing(self) -> None:
@@ -1375,7 +1567,11 @@ class ToneSlapperWindow:
             self._show_flying_tip(self.validate_button, "select target device")
             return
         selected = filedialog.askopenfilename(
-            filetypes=[("Tone container", "*.bin"), ("All files", "*.*")]
+            parent=self,
+            filetypes=[
+                ("Tone container", "*.bin"),
+                ("All files", "*.*"),
+            ],
         )
         if not selected:
             return
@@ -1390,11 +1586,7 @@ class ToneSlapperWindow:
     def _existing_opened(self, result: BuildResult) -> None:
         self.last_build = result
         self.build_dirty = False
-        self.output_var.set(result.output)
-        messagebox.showinfo(
-            APP_NAME,
-            f"Container validated and loaded for upload.\n\n{result.output}\n\nSHA-256:\n{result.sha256}",
-        )
+        self.output_var.set(str(result.output))
 
     def _device_identifier(self) -> str | None:
         return self.devices.get(self.device_var.get())
@@ -1414,12 +1606,13 @@ class ToneSlapperWindow:
                 APP_NAME,
                 "The loaded prompt file targets a different headphone model. "
                 "Rebuild or open a compatible file before uploading.",
+                parent=self,
             )
             return
         candidate = Path(self.last_build.output)
         confirmation = (
             "Write the selected prompt container to the headphones?\n\n"
-            f"Device: {identifier}\n"
+            f"Device: {self.device_var.get()}\n"
             f"File: {candidate.name}\n"
             f"SHA-256: {self.last_build.sha256}\n\n"
             "This modifies prompt data stored on the headphones. An interrupted or "
@@ -1430,7 +1623,12 @@ class ToneSlapperWindow:
             "If the upload fails, reconnect and rescan the headphones, then use Restore OEM "
             "English to write the verified recovery image."
         )
-        if not messagebox.askyesno(APP_NAME, confirmation, icon="warning"):
+        if not messagebox.askyesno(
+            APP_NAME,
+            confirmation,
+            icon="warning",
+            parent=self,
+        ):
             return
         expected_hash = self.last_build.sha256
         self._run_background(
@@ -1454,7 +1652,7 @@ class ToneSlapperWindow:
             return
         confirmation = (
             "Write the verified OEM English recovery image to the headphones?\n\n"
-            f"Device: {identifier}\n"
+            f"Device: {self.device_var.get()}\n"
             f"Recovery SHA-256: {BASE_SHA256}\n\n"
             "The OEM file will be downloaded and cryptographically verified before writing. "
             "Once writing starts, do not close the app, power off or disconnect the headphones, "
@@ -1463,7 +1661,12 @@ class ToneSlapperWindow:
             "Interrupting recovery may leave voice prompts unavailable and require another OEM "
             "restore attempt."
         )
-        if not messagebox.askyesno(APP_NAME, confirmation, icon="warning"):
+        if not messagebox.askyesno(
+            APP_NAME,
+            confirmation,
+            icon="warning",
+            parent=self,
+        ):
             return
         self._acquire_oem(
             "restore",
@@ -1522,26 +1725,60 @@ class ToneSlapperWindow:
             return
         self.devices.pop(display, None)
         self.device_models.pop(display, None)
-        self.device_combo.configure(values=tuple(self.devices))
+        values = tuple(self.devices)
+        self.device_combo.blockSignals(True)
+        self.device_combo.clear()
+        self.device_combo.addItems(values)
+        self.device_combo.setCurrentIndex(-1)
+        self.device_combo.blockSignals(False)
         self.device_var.set("")
+        self._update_buttons()
 
     def _update_buttons(self) -> None:
         if self.busy:
             self._set_prompt_hover(None)
-        normal_state = "disabled" if self.busy else "normal"
-        self.device_combo.configure(state="disabled" if self.busy else "readonly")
-        has_listed_devices = bool(self.devices)
-        self.scan_button.configure(
-            state=normal_state,
-            style="TButton" if has_listed_devices else "Accent.TButton",
+
+        self.device_combo.setEnabled(not self.busy)
+        self.scan_button.setEnabled(not self.busy)
+        self._set_button_style(
+            self.scan_button,
+            role="" if self.devices else "accent",
         )
-        build_enabled = not self.busy and self.target_profile_id is not None
-        self.build_button.configure(
-            state="normal" if build_enabled else "disabled",
-            style="Accent.TButton" if build_enabled and self.build_dirty else "TButton",
+
+        build_available = (
+            self.target_profile_id is not None
+            and bool(self.assignments)
         )
-        open_enabled = not self.busy and self.target_profile_id is not None
-        self.validate_button.configure(state="normal" if open_enabled else "disabled")
+        self.workflow_slot.setVisible(self.target_profile_id is not None)
+        self.workflow_stack.setCurrentWidget(
+            self.build_button_row
+            if build_available
+            else self.open_divider
+        )
+        self.build_button.setEnabled(not self.busy)
+        self.build_button.setProperty("available", build_available)
+        self._set_button_style(
+            self.build_button,
+            role="accent" if build_available and self.build_dirty else "",
+            available=build_available,
+        )
+
+        open_available = self.target_profile_id is not None
+        open_prominent = (
+            open_available
+            and not self.assignments
+            and self.last_build is None
+        )
+        self.validate_button.setEnabled(not self.busy)
+        self._set_button_style(
+            self.validate_button,
+            role="openProminent" if open_prominent else "path",
+            available=open_available,
+        )
+        self.clear_package_button.setVisible(self.last_build is not None)
+        self.clear_package_button.setEnabled(not self.busy)
+        self._refresh_package_text()
+
         selected_profile_id = self._selected_profile_id()
         has_device = (
             self._device_identifier() is not None and selected_profile_id is not None
@@ -1550,25 +1787,53 @@ class ToneSlapperWindow:
             self.last_build is not None
             and self.last_build.profile_id == selected_profile_id
         )
-        self.upload_button.set_enabled(
-            not self.busy and has_device and loaded_profile_matches
+        self.upload_button.set_enabled(not self.busy)
+        self.upload_button.set_available(
+            has_device and loaded_profile_matches
         )
-        self.recovery_button.configure(
-            state="normal" if not self.busy and has_device else "disabled"
+
+        self.recovery_button.setEnabled(not self.busy)
+        self._set_button_style(
+            self.recovery_button,
+            role="recovery",
+            available=has_device,
         )
-        for button in self._reset_buttons.values():
-            button.set_enabled(not self.busy)
-        for label in self._source_labels.values():
-            label.configure(cursor="arrow" if self.busy else "hand2")
+
+        self.prompt_tree.viewport().setCursor(
+            Qt.CursorShape.ArrowCursor
+            if self.busy
+            else Qt.CursorShape.PointingHandCursor
+        )
+        for index in range(self.prompt_tree.rowCount()):
+            self._refresh_prompt_row_style(index)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "prompt_tree"):
+            QTimer.singleShot(0, self._refresh_source_texts)
+        if hasattr(self, "validate_button"):
+            QTimer.singleShot(0, self._refresh_package_text)
 
 
-def main() -> None:
-    root = Tk()
+def create_application(argv: list[str] | None = None) -> QApplication:
+    if sys.platform == "win32" and "QT_QPA_PLATFORM" not in os.environ:
+        os.environ["QT_QPA_PLATFORM"] = WINDOWS_FONT_PLATFORM
+    application = QApplication.instance()
+    if application is None:
+        application = QApplication(argv if argv is not None else sys.argv)
+    application.setApplicationName(APP_NAME)
+    application.setApplicationVersion(APP_VERSION)
+    apply_dark_theme(application)
+    return application
+
+
+def main() -> int:
+    application = create_application()
     try:
-        ToneSlapperWindow(root)
+        window = ToneSlapperWindow()
     except Exception as error:
         traceback.print_exc()
         messagebox.showerror(APP_NAME, user_error_message("startup", error))
-        root.destroy()
-        return
-    root.mainloop()
+        return 1
+    window.show()
+    return application.exec()

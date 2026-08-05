@@ -23,15 +23,17 @@ if ($LASTEXITCODE -ne 0) {
     --noconfirm `
     --onefile `
     --windowed `
-    --name BTToneSlapper `
+    --name "BT Tone Slapper" `
     --icon "$Root\assets\icons\app_icon.ico" `
     --paths "$Root" `
+    --exclude-module tkinter `
     --hidden-import ctypes.wintypes `
     --collect-all bleak `
     --collect-submodules winrt `
     --add-data "$Root\assets\ffmpeg.exe;assets" `
     --add-data "$Root\assets\LzmaAlone.exe;assets" `
     --add-data "$Root\assets\icons;assets\icons" `
+    --add-data "$Root\assets\fonts;assets\fonts" `
     --add-data "$Root\LICENSE;." `
     --add-data "$Root\ATTRIBUTION.md;." `
     --add-data "$Root\THIRD_PARTY.md;." `
@@ -41,7 +43,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Portable build failed"
 }
 
-$Exe = Join-Path $Root "dist\BTToneSlapper.exe"
+$Exe = Join-Path $Root "dist\BT Tone Slapper.exe"
 $Hash = Get-FileHash $Exe -Algorithm SHA256
 Write-Host "Built: $Exe"
 Write-Host "SHA-256: $($Hash.Hash.ToLowerInvariant())"

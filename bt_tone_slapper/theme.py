@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import ctypes
 import sys
-from tkinter import Misc, PhotoImage, Tk
-from tkinter import ttk
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import QApplication, QWidget
+
+from .fonts import apply_variable_font_axes, body_font, register_bundled_fonts
 
 
 COLORS = {
@@ -28,13 +32,20 @@ COLORS = {
 }
 
 
-def apply_dark_title_bar(root: Misc) -> None:
+def refresh_style(widget: QWidget) -> None:
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
+    apply_variable_font_axes(widget)
+    widget.update()
+
+
+def apply_dark_title_bar(widget: QWidget) -> None:
     if sys.platform != "win32":
         return
     try:
-        root.update_idletasks()
         enabled = ctypes.c_int(1)
-        hwnd = root.winfo_id()
+        hwnd = int(widget.winId())
         for attribute in (20, 19):
             result = ctypes.windll.dwmapi.DwmSetWindowAttribute(
                 hwnd,
@@ -48,525 +59,437 @@ def apply_dark_title_bar(root: Misc) -> None:
         pass
 
 
-def apply_dark_theme(root: Tk) -> ttk.Style:
-    root.configure(background=COLORS["window"])
-    root.option_add("*Font", "{Segoe UI} 10")
-    root.option_add("*TCombobox*Listbox.background", COLORS["field"])
-    root.option_add("*TCombobox*Listbox.foreground", COLORS["text"])
-    root.option_add("*TCombobox*Listbox.selectBackground", COLORS["accent"])
-    root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
-    root.option_add("*TCombobox*Listbox.borderWidth", 0)
-    root.option_add("*TCombobox*Listbox.highlightThickness", 0)
-    root.option_add("*TCombobox*Listbox.relief", "flat")
-    root.option_add("*TCombobox*Listbox.selectBorderWidth", 0)
-    root.option_add("*TCombobox*Listbox.activestyle", "none")
+def apply_dark_theme(application: QApplication) -> None:
+    register_bundled_fonts()
+    application.setStyle("Fusion")
+    application.setFont(body_font(10))
 
-    style = ttk.Style(root)
-    style.theme_use("clam")
-    style.configure(".", background=COLORS["window"], foreground=COLORS["text"])
-    style.configure("TFrame", background=COLORS["window"])
-    style.configure("Header.TFrame", background=COLORS["window"])
-    style.configure(
-        "Card.TFrame",
-        background=COLORS["window"],
-        bordercolor=COLORS["window"],
-        borderwidth=0,
-        relief="flat",
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(COLORS["window"]))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(COLORS["text"]))
+    palette.setColor(QPalette.ColorRole.Base, QColor(COLORS["field"]))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(COLORS["surface"]))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#000000"))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#ffffff"))
+    palette.setColor(QPalette.ColorRole.Text, QColor(COLORS["text"]))
+    palette.setColor(QPalette.ColorRole.Button, QColor(COLORS["surface_hover"]))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(COLORS["text"]))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor("#ffffff"))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(COLORS["accent"]))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+    palette.setColor(
+        QPalette.ColorGroup.Disabled,
+        QPalette.ColorRole.Text,
+        QColor(COLORS["disabled"]),
     )
-    style.configure("CardBody.TFrame", background=COLORS["window"], borderwidth=0)
-    style.configure(
-        "PromptCard.TFrame",
-        background=COLORS["prompt_surface"],
-        bordercolor=COLORS["prompt_surface"],
-        borderwidth=0,
-        relief="flat",
+    palette.setColor(
+        QPalette.ColorGroup.Disabled,
+        QPalette.ColorRole.ButtonText,
+        QColor(COLORS["disabled"]),
     )
-    style.configure(
-        "PromptBody.TFrame",
-        background=COLORS["prompt_surface"],
-        borderwidth=0,
-    )
-    style.configure(
-        "PromptEmpty.TLabel",
-        background=COLORS["prompt_surface"],
-        foreground=COLORS["muted"],
-        font=("Segoe UI", 22, "bold"),
-        anchor="center",
-        justify="center",
-    )
-    style.configure(
-        "FieldShell.TFrame",
-        background=COLORS["field"],
-        bordercolor=COLORS["border"],
-        borderwidth=1,
-        relief="solid",
-    )
-    style.configure("TLabel", background=COLORS["window"], foreground=COLORS["text"])
-    style.configure(
-        "Title.TLabel",
-        background=COLORS["window"],
-        foreground=COLORS["text"],
-        font=("Segoe UI Variable Display", 20, "bold"),
-    )
-    style.configure(
-        "Subtitle.TLabel",
-        background=COLORS["window"],
-        foreground=COLORS["muted"],
-        font=("Segoe UI", 9),
-    )
-    style.configure(
-        "Section.TLabel",
-        background=COLORS["surface"],
-        foreground=COLORS["text"],
-        font=("Segoe UI Semibold", 10, "bold"),
-    )
-    style.configure("Card.TLabel", background=COLORS["surface"], foreground=COLORS["text"])
-    style.configure(
-        "Muted.Card.TLabel",
-        background=COLORS["surface"],
-        foreground=COLORS["muted"],
-        font=("Segoe UI", 9),
-    )
-    style.configure(
-        "Status.TLabel",
-        background=COLORS["surface_hover"],
-        foreground=COLORS["text"],
-        font=("Segoe UI Semibold", 9),
-        padding=(10, 5),
-    )
-    style.configure(
-        "BuildTarget.TLabel",
-        background=COLORS["window"],
-        foreground=COLORS["text"],
-        font=("Segoe UI Semibold", 11),
-        padding=(0, 0),
-    )
-    style.configure(
-        "WriteWarning.TLabel",
-        background=COLORS["window"],
-        foreground=COLORS["accent"],
-        font=("Segoe UI Semibold", 10, "bold"),
-        padding=(0, 2),
-    )
+    application.setPalette(palette)
+    application.setStyleSheet(
+        f"""
+        QWidget {{
+            background: {COLORS["window"]};
+            color: {COLORS["text"]};
+            selection-background-color: {COLORS["selection"]};
+            selection-color: {COLORS["text"]};
+        }}
 
-    style.configure(
-        "TButton",
-        background=COLORS["surface_hover"],
-        foreground=COLORS["text"],
-        bordercolor=COLORS["border"],
-        lightcolor=COLORS["surface_hover"],
-        darkcolor=COLORS["surface_hover"],
-        borderwidth=1,
-        focusthickness=0,
-        focuscolor=COLORS["surface_hover"],
-        font=("Segoe UI Semibold", 9),
-        padding=(13, 8),
-        relief="flat",
-        shiftrelief=0,
-    )
-    style.layout(
-        "TButton",
-        [
-            (
-                "Button.border",
-                {
-                    "sticky": "nswe",
-                    "border": "1",
-                    "children": [
-                        (
-                            "Button.padding",
-                            {
-                                "sticky": "nswe",
-                                "children": [("Button.label", {"sticky": "nswe"})],
-                            },
-                        )
-                    ],
-                },
-            )
-        ],
-    )
-    style.map(
-        "TButton",
-        background=[("pressed", "#121212"), ("active", "#2c2c2c"), ("disabled", "#2a2a2a")],
-        foreground=[("disabled", COLORS["disabled"])],
-        bordercolor=[("pressed", "#121212"), ("active", "#424242"), ("disabled", "#363636")],
-        lightcolor=[("pressed", "#121212"), ("active", "#2c2c2c"), ("disabled", "#2a2a2a")],
-        darkcolor=[("pressed", "#121212"), ("active", "#2c2c2c"), ("disabled", "#2a2a2a")],
-        relief=[("pressed", "flat"), ("active", "flat")],
-    )
-    style.configure(
-        "Accent.TButton",
-        background=COLORS["accent"],
-        foreground="#ffffff",
-        bordercolor=COLORS["accent"],
-        lightcolor=COLORS["accent"],
-        darkcolor=COLORS["accent"],
-        font=("Segoe UI Semibold", 9),
-        padding=(15, 8),
-    )
-    style.map(
-        "Accent.TButton",
-        background=[
-            ("pressed", COLORS["accent_pressed"]),
-            ("active", COLORS["accent_hover"]),
-            ("disabled", "#56372f"),
-        ],
-        foreground=[("disabled", "#9a7770")],
-        bordercolor=[
-            ("pressed", COLORS["accent_pressed"]),
-            ("active", COLORS["accent_hover"]),
-            ("disabled", "#56372f"),
-        ],
-        lightcolor=[
-            ("pressed", COLORS["accent_pressed"]),
-            ("active", COLORS["accent_hover"]),
-            ("disabled", "#56372f"),
-        ],
-        darkcolor=[
-            ("pressed", COLORS["accent_pressed"]),
-            ("active", COLORS["accent_hover"]),
-            ("disabled", "#56372f"),
-        ],
-        relief=[("pressed", "flat"), ("active", "flat")],
-    )
-    style.configure(
-        "Danger.TButton",
-        background=COLORS["danger"],
-        foreground="#ffffff",
-        bordercolor=COLORS["danger"],
-        lightcolor=COLORS["danger"],
-        darkcolor=COLORS["danger"],
-    )
-    style.map(
-        "Danger.TButton",
-        background=[("pressed", "#a92f3a"), ("active", COLORS["danger_hover"]), ("disabled", "#4a2a30")],
-        foreground=[("disabled", "#8d6c72")],
-        bordercolor=[("pressed", "#a92f3a"), ("active", COLORS["danger_hover"]), ("disabled", "#4a2a30")],
-        lightcolor=[("pressed", "#a92f3a"), ("active", COLORS["danger_hover"]), ("disabled", "#4a2a30")],
-        darkcolor=[("pressed", "#a92f3a"), ("active", COLORS["danger_hover"]), ("disabled", "#4a2a30")],
-        relief=[("pressed", "flat"), ("active", "flat")],
-    )
-    style.configure(
-        "Success.TButton",
-        background=COLORS["success"],
-        foreground="#ffffff",
-        bordercolor=COLORS["success"],
-        lightcolor=COLORS["success"],
-        darkcolor=COLORS["success"],
-    )
-    style.map(
-        "Success.TButton",
-        background=[
-            ("pressed", COLORS["success_pressed"]),
-            ("active", COLORS["success_hover"]),
-        ],
-        bordercolor=[
-            ("pressed", COLORS["success_pressed"]),
-            ("active", COLORS["success_hover"]),
-        ],
-        lightcolor=[
-            ("pressed", COLORS["success_pressed"]),
-            ("active", COLORS["success_hover"]),
-        ],
-        darkcolor=[
-            ("pressed", COLORS["success_pressed"]),
-            ("active", COLORS["success_hover"]),
-        ],
-        relief=[("pressed", "flat"), ("active", "flat")],
-    )
-    style.configure(
-        "Ghost.TButton",
-        background=COLORS["surface"],
-        foreground=COLORS["muted"],
-        bordercolor=COLORS["border"],
-        lightcolor=COLORS["surface"],
-        darkcolor=COLORS["surface"],
-    )
-    style.map(
-        "Ghost.TButton",
-        background=[("pressed", COLORS["field"]), ("active", COLORS["surface_hover"])],
-        foreground=[("active", COLORS["text"]), ("disabled", COLORS["disabled"])],
-        bordercolor=[("pressed", COLORS["field"])],
-        lightcolor=[("pressed", COLORS["field"]), ("active", COLORS["surface_hover"])],
-        darkcolor=[("pressed", COLORS["field"]), ("active", COLORS["surface_hover"])],
-        relief=[("pressed", "flat"), ("active", "flat")],
-    )
-    style.configure(
-        "Path.TButton",
-        background=COLORS["window"],
-        foreground=COLORS["muted"],
-        bordercolor=COLORS["window"],
-        lightcolor=COLORS["window"],
-        darkcolor=COLORS["window"],
-        borderwidth=0,
-        focusthickness=0,
-        focuscolor=COLORS["window"],
-        anchor="center",
-        padding=(0, 4),
-        relief="flat",
-    )
-    style.map(
-        "Path.TButton",
-        background=[("active", COLORS["window"]), ("pressed", COLORS["window"]), ("disabled", COLORS["window"])],
-        foreground=[("active", COLORS["accent_hover"]), ("disabled", COLORS["disabled"])],
-        bordercolor=[("active", COLORS["window"]), ("pressed", COLORS["window"])],
-        lightcolor=[("active", COLORS["window"]), ("pressed", COLORS["window"])],
-        darkcolor=[("active", COLORS["window"]), ("pressed", COLORS["window"])],
-        relief=[("pressed", "flat"), ("active", "flat")],
-    )
-    style.configure(
-        "UtilityLink.TButton",
-        background=COLORS["window"],
-        foreground="#cccccc",
-        bordercolor=COLORS["window"],
-        lightcolor=COLORS["window"],
-        darkcolor=COLORS["window"],
-        borderwidth=0,
-        focusthickness=0,
-        focuscolor=COLORS["window"],
-        font=("Segoe UI Semibold", 10),
-        padding=(11, 8),
-        relief="flat",
-    )
-    style.map(
-        "UtilityLink.TButton",
-        background=[("active", COLORS["window"]), ("pressed", COLORS["window"])],
-        foreground=[("active", COLORS["text"])],
-        bordercolor=[("active", COLORS["window"]), ("pressed", COLORS["window"])],
-        lightcolor=[("active", COLORS["window"]), ("pressed", COLORS["window"])],
-        darkcolor=[("active", COLORS["window"]), ("pressed", COLORS["window"])],
-        relief=[("pressed", "flat"), ("active", "flat")],
-    )
-    style.configure(
-        "HelpTitle.TLabel",
-        background=COLORS["window"],
-        foreground=COLORS["text"],
-        font=("Segoe UI Variable Display", 16, "bold"),
-    )
-    style.configure(
-        "HelpHeading.TLabel",
-        background=COLORS["window"],
-        foreground=COLORS["accent_hover"],
-        font=("Segoe UI Semibold", 10, "bold"),
-    )
-    style.configure(
-        "HelpBody.TLabel",
-        background=COLORS["window"],
-        foreground=COLORS["text"],
-        font=("Segoe UI", 9),
-    )
-    style.configure(
-        "RecoveryLink.TButton",
-        background=COLORS["window"],
-        foreground=COLORS["danger_hover"],
-        bordercolor=COLORS["window"],
-        lightcolor=COLORS["window"],
-        darkcolor=COLORS["window"],
-        borderwidth=0,
-        focusthickness=0,
-        focuscolor=COLORS["window"],
-        anchor="center",
-        padding=(0, 4),
-        relief="flat",
-    )
-    style.map(
-        "RecoveryLink.TButton",
-        background=[("active", COLORS["window"]), ("pressed", COLORS["window"]), ("disabled", COLORS["window"])],
-        foreground=[("active", "#ffffff"), ("disabled", COLORS["disabled"])],
-        bordercolor=[("active", COLORS["window"]), ("pressed", COLORS["window"]), ("disabled", COLORS["window"])],
-        lightcolor=[("active", COLORS["window"]), ("pressed", COLORS["window"]), ("disabled", COLORS["window"])],
-        darkcolor=[("active", COLORS["window"]), ("pressed", COLORS["window"]), ("disabled", COLORS["window"])],
-        relief=[("pressed", "flat"), ("active", "flat")],
-    )
+        QMainWindow, QDialog {{
+            background: {COLORS["window"]};
+        }}
 
-    style.configure(
-        "TEntry",
-        fieldbackground=COLORS["field"],
-        foreground=COLORS["text"],
-        insertcolor=COLORS["text"],
-        bordercolor=COLORS["border"],
-        lightcolor=COLORS["field"],
-        darkcolor=COLORS["field"],
-        padding=(9, 8),
+        QFrame#promptPanel, QWidget#promptPanel {{
+            background: {COLORS["prompt_surface"]};
+            border-radius: 14px;
+        }}
+
+        QLabel#promptEmpty {{
+            background: transparent;
+            color: {COLORS["text"]};
+            font-size: 18pt;
+            font-weight: 700;
+        }}
+
+        QLabel#helpTitle {{
+            font-size: 18pt;
+            font-weight: 700;
+            color: {COLORS["text"]};
+        }}
+
+        QLabel#helpHeading {{
+            font-size: 14pt;
+            font-weight: 700;
+            color: {COLORS["text"]};
+        }}
+
+        QLabel#helpBody {{
+            font-size: 10pt;
+            font-weight: 500;
+            color: {COLORS["text"]};
+        }}
+
+        QLabel#helpBullet {{
+            font-size: 10pt;
+            font-weight: 700;
+            color: {COLORS["accent_hover"]};
+        }}
+
+        QLabel#helpLink {{
+            font-size: 10pt;
+            font-weight: 500;
+            color: {COLORS["accent_hover"]};
+        }}
+
+        QPushButton {{
+            min-height: 42px;
+            border: 0;
+            border-radius: 0;
+            padding: 0 14px;
+            background: {COLORS["surface_hover"]};
+            color: {COLORS["text"]};
+            font-size: 14pt;
+            font-weight: 700;
+            outline: none;
+        }}
+
+        QPushButton:hover {{
+            background: #2c2c2c;
+        }}
+
+        QPushButton:pressed {{
+            background: #121212;
+        }}
+
+        QPushButton:disabled {{
+            background: #2a2a2a;
+            color: {COLORS["disabled"]};
+        }}
+
+        QPushButton[available="false"] {{
+            background: #2a2a2a;
+            color: {COLORS["disabled"]};
+        }}
+
+        QPushButton[available="false"]:hover,
+        QPushButton[available="false"]:pressed {{
+            background: #2a2a2a;
+            color: {COLORS["disabled"]};
+        }}
+
+        QPushButton[role="accent"] {{
+            background: {COLORS["accent"]};
+            color: #ffffff;
+        }}
+
+        QPushButton[role="accent"]:hover {{
+            background: {COLORS["accent_hover"]};
+        }}
+
+        QPushButton[role="accent"]:pressed {{
+            background: {COLORS["accent_pressed"]};
+        }}
+
+        QPushButton[role="success"] {{
+            background: {COLORS["success"]};
+            color: #ffffff;
+        }}
+
+        QPushButton[role="success"]:hover {{
+            background: {COLORS["success_hover"]};
+        }}
+
+        QPushButton[role="success"]:pressed {{
+            background: {COLORS["success_pressed"]};
+        }}
+
+        QPushButton[role="ghost"] {{
+            background: {COLORS["surface"]};
+            color: {COLORS["muted"]};
+        }}
+
+        QPushButton[role="ghost"]:hover {{
+            background: {COLORS["surface_hover"]};
+            color: {COLORS["text"]};
+        }}
+
+        QPushButton[role="path"] {{
+            min-height: 42px;
+            padding: 0 8px;
+            background: transparent;
+            color: {COLORS["muted"]};
+        }}
+
+        QPushButton[role="path"]:hover {{
+            background: transparent;
+            color: {COLORS["accent_hover"]};
+        }}
+
+        QPushButton[role="path"]:pressed {{
+            background: transparent;
+            color: {COLORS["accent"]};
+        }}
+
+        QPushButton[role="path"][available="false"],
+        QPushButton[role="path"][available="false"]:hover,
+        QPushButton[role="path"][available="false"]:pressed {{
+            background: transparent;
+            color: {COLORS["disabled"]};
+        }}
+
+        QPushButton[role="openProminent"] {{
+            min-height: 42px;
+            padding: 0 8px;
+            background: transparent;
+            color: {COLORS["accent_hover"]};
+            font-size: 14pt;
+            font-weight: 700;
+        }}
+
+        QPushButton[role="openProminent"]:hover {{
+            background: transparent;
+            color: #ffffff;
+        }}
+
+        QPushButton[role="openProminent"]:pressed {{
+            background: transparent;
+            color: {COLORS["accent"]};
+        }}
+
+        QPushButton[role="openProminent"]:disabled {{
+            background: transparent;
+            color: {COLORS["disabled"]};
+        }}
+
+        QFrame#orDividerLine {{
+            border: 0;
+            background: {COLORS["border"]};
+        }}
+
+        QLabel#orDividerLabel {{
+            background: transparent;
+            color: {COLORS["muted"]};
+            font-size: 10pt;
+            font-weight: 700;
+        }}
+
+        QPushButton[role="clearPackage"] {{
+            min-height: 42px;
+            padding: 0;
+            background: transparent;
+            color: {COLORS["muted"]};
+            font-size: 18pt;
+            font-weight: 500;
+        }}
+
+        QPushButton[role="clearPackage"]:hover {{
+            background: transparent;
+            color: #ffffff;
+        }}
+
+        QPushButton[role="clearPackage"]:pressed {{
+            background: transparent;
+            color: {COLORS["accent"]};
+        }}
+
+        QPushButton[role="clearPackage"]:disabled {{
+            background: transparent;
+            color: {COLORS["disabled"]};
+        }}
+
+        QPushButton#buildButton,
+        QPushButton#scanButton {{
+            border-radius: 8px;
+        }}
+
+        QPushButton[role="recovery"] {{
+            min-height: 30px;
+            padding: 0 8px;
+            background: transparent;
+            color: {COLORS["danger_hover"]};
+            font-size: 10pt;
+            font-weight: 700;
+        }}
+
+        QPushButton[role="recovery"]:hover {{
+            background: transparent;
+            color: #ffffff;
+        }}
+
+        QPushButton[role="recovery"]:pressed {{
+            background: transparent;
+            color: {COLORS["danger"]};
+        }}
+
+        QPushButton[role="recovery"][available="false"],
+        QPushButton[role="recovery"][available="false"]:hover,
+        QPushButton[role="recovery"][available="false"]:pressed {{
+            background: transparent;
+            color: {COLORS["disabled"]};
+        }}
+
+        QPushButton[role="link"] {{
+            min-height: 38px;
+            padding: 0 10px;
+            background: transparent;
+            color: #cccccc;
+            font-size: 10pt;
+            font-weight: 700;
+            text-align: left;
+        }}
+
+        QPushButton[role="link"]:hover {{
+            background: transparent;
+            color: {COLORS["text"]};
+        }}
+
+        QPushButton[role="link"]:pressed {{
+            background: transparent;
+            color: {COLORS["accent_hover"]};
+        }}
+
+        QComboBox {{
+            min-height: 42px;
+            border: 0;
+            border-radius: 8px;
+            padding: 0 36px 0 12px;
+            background: {COLORS["prompt_surface"]};
+            color: {COLORS["text"]};
+            font-size: 14pt;
+            font-weight: 700;
+            outline: none;
+        }}
+
+        QComboBox:hover {{
+            background: {COLORS["prompt_surface"]};
+        }}
+
+        QComboBox:disabled {{
+            color: {COLORS["disabled"]};
+            background: {COLORS["prompt_surface"]};
+        }}
+
+        QComboBox::drop-down {{
+            width: 32px;
+            border: 0;
+            background: transparent;
+        }}
+
+        QComboBox::down-arrow {{
+            image: none;
+            width: 9px;
+            height: 6px;
+        }}
+
+        QComboBox QAbstractItemView {{
+            border: 0;
+            outline: 0;
+            padding: 0;
+            background: {COLORS["field"]};
+            color: {COLORS["text"]};
+            selection-background-color: {COLORS["accent"]};
+            selection-color: #ffffff;
+        }}
+
+        QTableWidget {{
+            border: 0;
+            outline: 0;
+            gridline-color: transparent;
+            background: transparent;
+            alternate-background-color: transparent;
+            color: {COLORS["text"]};
+            font-size: 10pt;
+            font-weight: 500;
+        }}
+
+        QTableWidget::item {{
+            border: 0;
+            padding: 0 10px;
+        }}
+
+        QTableWidget::item:selected {{
+            background: transparent;
+            color: {COLORS["text"]};
+        }}
+
+        QTableWidget::item:disabled {{
+            color: {COLORS["disabled"]};
+        }}
+
+        QScrollArea#helpScroll {{
+            border: 0;
+            background: transparent;
+        }}
+
+        QScrollArea#helpScroll > QWidget > QWidget {{
+            background: transparent;
+        }}
+
+        QHeaderView {{
+            background: transparent;
+        }}
+
+        QHeaderView::section {{
+            min-height: 38px;
+            border: 0;
+            padding: 0 10px;
+            background: transparent;
+            color: {COLORS["text"]};
+            font-size: 10pt;
+            font-weight: 700;
+        }}
+
+        QAbstractScrollArea::corner {{
+            background: transparent;
+        }}
+
+        QScrollBar:vertical {{
+            width: 9px;
+            margin: 0;
+            border: 0;
+            background: transparent;
+        }}
+
+        QScrollBar::handle:vertical {{
+            min-height: 30px;
+            border: 0;
+            background: #3a3a3a;
+        }}
+
+        QScrollBar::handle:vertical:hover {{
+            background: #505050;
+        }}
+
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical,
+        QScrollBar::add-page:vertical,
+        QScrollBar::sub-page:vertical {{
+            height: 0;
+            background: transparent;
+        }}
+
+        QPlainTextEdit {{
+            border: 0;
+            padding: 12px;
+            background: {COLORS["field"]};
+            color: {COLORS["text"]};
+            font-size: 10pt;
+            font-weight: 500;
+            selection-background-color: {COLORS["selection"]};
+        }}
+
+        QMessageBox {{
+            background: {COLORS["window"]};
+        }}
+
+        QToolTip {{
+            border: 0;
+            padding: 5px 8px;
+            background: #000000;
+            color: #ffffff;
+        }}
+        """
     )
-    style.map(
-        "TEntry",
-        bordercolor=[("focus", COLORS["accent"])],
-        fieldbackground=[("readonly", COLORS["field"])],
-        foreground=[("readonly", COLORS["muted"])],
-    )
-    style.configure(
-        "TCombobox",
-        fieldbackground=COLORS["field"],
-        background=COLORS["surface_hover"],
-        foreground=COLORS["text"],
-        arrowcolor=COLORS["muted"],
-        bordercolor=COLORS["border"],
-        lightcolor=COLORS["field"],
-        darkcolor=COLORS["field"],
-        padding=(8, 7),
-    )
-    style.map(
-        "TCombobox",
-        fieldbackground=[("readonly", COLORS["field"])],
-        foreground=[("readonly", COLORS["text"])],
-        bordercolor=[("focus", COLORS["accent"])],
-        arrowcolor=[("active", COLORS["accent"])],
-    )
-    style.configure(
-        "Minimal.TCombobox",
-        fieldbackground=COLORS["field"],
-        background=COLORS["field"],
-        foreground=COLORS["text"],
-        arrowcolor=COLORS["muted"],
-        bordercolor=COLORS["field"],
-        lightcolor=COLORS["field"],
-        darkcolor=COLORS["field"],
-        arrowsize=14,
-        padding=(8, 7),
-        selectbackground=COLORS["field"],
-        selectforeground=COLORS["text"],
-    )
-    style.configure(
-        "ComboboxPopdownFrame",
-        background=COLORS["field"],
-        bordercolor=COLORS["field"],
-        lightcolor=COLORS["field"],
-        darkcolor=COLORS["field"],
-        borderwidth=0,
-        relief="flat",
-    )
-    style.map(
-        "Minimal.TCombobox",
-        fieldbackground=[("readonly", COLORS["field"])],
-        background=[("readonly", COLORS["field"]), ("active", COLORS["field"])],
-        foreground=[("readonly", COLORS["text"])],
-        bordercolor=[("readonly", COLORS["field"]), ("focus", COLORS["field"])],
-        arrowcolor=[("active", COLORS["accent"]), ("readonly", COLORS["muted"])],
-        selectbackground=[("readonly", COLORS["field"])],
-        selectforeground=[("readonly", COLORS["text"])],
-    )
-    root._combobox_spacer = PhotoImage(width=7, height=1)
-    style.element_create("Minimal.Combobox.spacer", "image", root._combobox_spacer)
-    style.layout(
-        "Minimal.TCombobox",
-        [
-            ("Minimal.Combobox.spacer", {"side": "right", "sticky": "ns"}),
-            ("Combobox.downarrow", {"side": "right", "sticky": "ns"}),
-            (
-                "Combobox.field",
-                {
-                    "sticky": "nswe",
-                    "children": [
-                        (
-                            "Combobox.padding",
-                            {
-                                "sticky": "nswe",
-                                "children": [("Combobox.textarea", {"sticky": "nswe"})],
-                            },
-                        )
-                    ],
-                },
-            ),
-        ],
-    )
-    style.configure(
-        "OEMSource.TLabel",
-        background=COLORS["prompt_surface"],
-        foreground=COLORS["text"],
-        anchor="center",
-        padding=(0, 0),
-        font=("Segoe UI", 9),
-    )
-    style.configure(
-        "CustomSource.TLabel",
-        background=COLORS["prompt_surface"],
-        foreground="#ffad98",
-        anchor="w",
-        padding=(10, 0),
-        font=("Segoe UI", 9),
-    )
-    style.configure(
-        "OEMSourceHover.TLabel",
-        background=COLORS["surface_hover"],
-        foreground=COLORS["text"],
-        anchor="center",
-        padding=(0, 0),
-        font=("Segoe UI", 9),
-    )
-    style.configure(
-        "CustomSourceHover.TLabel",
-        background=COLORS["surface_hover"],
-        foreground="#ffad98",
-        anchor="w",
-        padding=(10, 0),
-        font=("Segoe UI", 9),
-    )
-    style.configure(
-        "Treeview",
-        background=COLORS["field"],
-        fieldbackground=COLORS["field"],
-        foreground=COLORS["text"],
-        bordercolor=COLORS["field"],
-        lightcolor=COLORS["field"],
-        darkcolor=COLORS["field"],
-        borderwidth=0,
-        relief="flat",
-        focuscolor=COLORS["prompt_surface"],
-        focusthickness=0,
-        rowheight=30,
-        font=("Segoe UI", 9),
-    )
-    style.configure(
-        "Prompt.Treeview",
-        background=COLORS["prompt_surface"],
-        fieldbackground=COLORS["prompt_surface"],
-        foreground=COLORS["text"],
-        bordercolor=COLORS["prompt_surface"],
-        lightcolor=COLORS["prompt_surface"],
-        darkcolor=COLORS["prompt_surface"],
-        borderwidth=0,
-        relief="flat",
-        rowheight=30,
-        font=("Segoe UI", 9),
-    )
-    style.map("Treeview", background=[("selected", COLORS["selection"])], foreground=[("selected", "#ffffff")])
-    style.map(
-        "Prompt.Treeview",
-        background=[("selected", COLORS["selection"])],
-        foreground=[("selected", "#ffffff")],
-        bordercolor=[("focus", COLORS["prompt_surface"])],
-        lightcolor=[("focus", COLORS["prompt_surface"])],
-        darkcolor=[("focus", COLORS["prompt_surface"])],
-    )
-    style.configure(
-        "Treeview.Heading",
-        background=COLORS["surface_hover"],
-        foreground=COLORS["muted"],
-        bordercolor=COLORS["border"],
-        lightcolor=COLORS["surface_hover"],
-        darkcolor=COLORS["surface_hover"],
-        font=("Segoe UI Semibold", 9),
-        padding=(8, 8),
-        relief="flat",
-    )
-    style.map("Treeview.Heading", background=[("active", "#2a2a2a")])
-    style.configure(
-        "Vertical.TScrollbar",
-        background=COLORS["surface_hover"],
-        troughcolor=COLORS["prompt_surface"],
-        bordercolor=COLORS["prompt_surface"],
-        arrowcolor=COLORS["muted"],
-        lightcolor=COLORS["surface_hover"],
-        darkcolor=COLORS["surface_hover"],
-    )
-    style.configure(
-        "Accent.Horizontal.TProgressbar",
-        background=COLORS["accent"],
-        troughcolor=COLORS["field"],
-        bordercolor=COLORS["border"],
-        lightcolor=COLORS["accent"],
-        darkcolor=COLORS["accent"],
-    )
-    apply_dark_title_bar(root)
-    return style
+    application.setAttribute(Qt.ApplicationAttribute.AA_DontShowIconsInMenus, True)

@@ -1,10 +1,11 @@
 /.venv/
 /build/
 /dist/*
-!/dist/BTToneSlapper.exe
+!/dist/BT Tone Slapper.exe
 /*.spec
 /.pytest_cache/
 /__pycache__/
 /**/__pycache__/
 *.py[cod]
 /self-test*.json
+/English_prompt_v0.0.5.bin

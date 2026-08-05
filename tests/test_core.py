@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import hashlib
 import asyncio
+import os
 import struct
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from tkinter import Tk
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QFont, QFontInfo, QFontMetricsF
+from PySide6.QtWidgets import QLabel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -23,6 +29,19 @@ from bt_tone_slapper.device_profiles import (
     resolve_device_profile,
 )
 from bt_tone_slapper.errors import UserFacingError, user_error_message
+from bt_tone_slapper.fonts import (
+    BODY_FONT_FAMILY,
+    EMPHASIS_FONT_FAMILY,
+    FONT_ASSETS,
+    GRAYSCALE_ANTIALIASING,
+    OPTICAL_SIZE_AXIS,
+    WEIGHT_AXIS,
+    body_font,
+    body_family,
+    emphasis_font,
+    emphasis_family,
+    register_bundled_fonts,
+)
 from bt_tone_slapper.gui import (
     CLOSE_BLOCKED_TEXT,
     DONATE_URL,
@@ -30,10 +49,11 @@ from bt_tone_slapper.gui import (
     SUPPORTED_AUDIO_FORMATS,
     SUPPORTED_DEVICES,
     ToneSlapperWindow,
-    WRITE_WARNING_TEXT,
+    create_application,
     load_legal_documents,
 )
 from bt_tone_slapper.protocol import SERVICE_UUID, WRITE_UUID, NOTIFY_UUID
+from bt_tone_slapper.theme import COLORS
 from bt_tone_slapper.oem import (
     OEM_GITHUB_MANUAL_URL,
     OEM_GITHUB_URL,
@@ -82,49 +102,320 @@ def test_engine() -> ToneSlapperEngine:
 
 
 class CoreTests(unittest.TestCase):
-    def test_prompt_list_waits_for_device_target(self) -> None:
-        root = Tk()
-        root.withdraw()
-        try:
-            window = ToneSlapperWindow(root)
-            root.update_idletasks()
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.qt_application = create_application([])
 
-            self.assertTrue(root.protocol("WM_DELETE_WINDOW"))
-            self.assertEqual(window.prompt_empty_label.cget("text"), "Select a device first")
-            self.assertEqual(str(window.prompt_empty_label.cget("anchor")), "center")
-            self.assertEqual(str(window.prompt_empty_label.cget("justify")), "center")
-            prompt_empty_font = str(window.prompt_empty_label.cget("font"))
-            self.assertIn("22", prompt_empty_font)
-            self.assertIn("bold", prompt_empty_font)
-            self.assertGreaterEqual(window.prompt_empty_label.winfo_reqheight(), 40)
-            self.assertTrue(window.prompt_empty_label.winfo_manager())
-            self.assertFalse(window.write_warning_label.winfo_manager())
-            self.assertEqual(window.write_warning_label.cget("text"), WRITE_WARNING_TEXT)
-            window._set_write_warning_visible(True)
-            root.update_idletasks()
-            self.assertTrue(window.write_warning_label.winfo_manager())
-            window._set_write_warning_visible(False)
-            self.assertFalse(window.write_warning_label.winfo_manager())
-            self.assertFalse(window.prompt_tree.winfo_manager())
-            self.assertEqual(window.prompt_tree.get_children(), ())
-            self.assertEqual(str(window.validate_button.cget("state")), "disabled")
+    def test_prompt_list_waits_for_device_target(self) -> None:
+        window = ToneSlapperWindow()
+        window.hide()
+        try:
+            self.qt_application.processEvents()
+
+            self.assertEqual(
+                window.prompt_empty_label.text(),
+                "Select a device first",
+            )
+            self.assertEqual(
+                window.prompt_empty_label.alignment(),
+                Qt.AlignmentFlag.AlignCenter,
+            )
+            prompt_empty_font = window.prompt_empty_label.font()
+            self.assertEqual(
+                QFontInfo(prompt_empty_font).family(),
+                EMPHASIS_FONT_FAMILY,
+            )
+            self.assertEqual(prompt_empty_font.pointSize(), 18)
+            self.assertEqual(prompt_empty_font.weight(), QFont.Weight.Bold)
+            self.assertGreaterEqual(window.prompt_empty_label.sizeHint().height(), 28)
+            self.assertIs(
+                window.prompt_stack.currentWidget(),
+                window.prompt_empty_label,
+            )
+            self.assertEqual(window.prompt_tree.rowCount(), 0)
+            self.assertEqual(window.prompt_card.corner_radius, 14)
+            self.assertTrue(window.prompt_card.mask().isEmpty())
+            self.assertTrue(
+                window.prompt_tree.viewport().testAttribute(
+                    Qt.WidgetAttribute.WA_TranslucentBackground
+                )
+            )
+            self.assertTrue(
+                window.prompt_tree.horizontalHeader().viewport().testAttribute(
+                    Qt.WidgetAttribute.WA_TranslucentBackground
+                )
+            )
+            self.assertFalse(window.validate_button.property("available"))
             with patch("bt_tone_slapper.gui.filedialog.askopenfilename") as choose:
                 window._choose_audio_for(0)
             choose.assert_not_called()
 
             window.target_profile_id = TUNE_720BT_PROFILE.profile_id
             window._refresh_prompt_rows()
-            root.update_idletasks()
+            self.qt_application.processEvents()
 
-            self.assertFalse(window.prompt_empty_label.winfo_manager())
-            self.assertTrue(window.prompt_tree.winfo_manager())
-            self.assertEqual(len(window.prompt_tree.get_children()), 11)
+            self.assertIs(
+                window.prompt_stack.currentWidget(),
+                window.prompt_tree,
+            )
+            self.assertEqual(window.prompt_tree.rowCount(), 11)
             self.assertEqual(
-                window.prompt_tree.item("10", "values")[1],
+                window.prompt_tree.item(10, 1).text(),
                 "Maximum volume",
             )
         finally:
-            root.destroy()
+            window.destroy()
+            self.qt_application.processEvents()
+
+    def test_build_requires_custom_audio_assignment(self) -> None:
+        window = ToneSlapperWindow()
+        window.hide()
+        try:
+            window.target_profile_id = TUNE_720BT_PROFILE.profile_id
+            window._refresh_prompt_rows()
+            window._update_buttons()
+
+            self.assertFalse(window.build_button.property("available"))
+            self.assertIs(
+                window.workflow_stack.currentWidget(),
+                window.open_divider,
+            )
+            with (
+                patch.object(window, "_show_flying_tip") as tip,
+                patch.object(window, "build") as build,
+            ):
+                window._build_button_pressed()
+            tip.assert_called_once_with(
+                window.build_button,
+                "choose a sound first",
+            )
+            build.assert_not_called()
+
+            window.assignments[0] = Path("power-on.wav")
+            window._invalidate_build()
+            self.assertTrue(window.build_button.property("available"))
+            self.assertEqual(window.build_button.property("role"), "accent")
+            self.assertIs(
+                window.workflow_stack.currentWidget(),
+                window.build_button_row,
+            )
+
+            window.build_dirty = False
+            window._update_buttons()
+            self.assertTrue(window.build_button.property("available"))
+            self.assertEqual(window.build_button.property("role"), "")
+
+            window._reset_prompt(0)
+            self.assertFalse(window.assignments)
+            self.assertFalse(window.build_button.property("available"))
+            self.assertIs(
+                window.workflow_stack.currentWidget(),
+                window.open_divider,
+            )
+        finally:
+            window.destroy()
+            self.qt_application.processEvents()
+
+    def test_prompt_hover_highlights_the_full_row(self) -> None:
+        window = ToneSlapperWindow()
+        window.show()
+        try:
+            window.target_profile_id = TUNE_720BT_PROFILE.profile_id
+            window._refresh_prompt_rows()
+            self.qt_application.processEvents()
+
+            hovered_row = 3
+            hover_position = QPoint(
+                window.prompt_tree.columnViewportPosition(3)
+                + window.prompt_tree.columnWidth(3) // 2,
+                window.prompt_tree.rowViewportPosition(hovered_row)
+                + window.prompt_tree.rowHeight(hovered_row) // 2,
+            )
+            window._set_prompt_hover(hovered_row)
+            self.qt_application.processEvents()
+
+            self.assertEqual(window._hovered_prompt, hovered_row)
+            for column in range(window.prompt_tree.columnCount()):
+                self.assertEqual(
+                    window.prompt_tree.item(
+                        hovered_row,
+                        column,
+                    ).background().color().name(),
+                    COLORS["surface_hover"],
+                )
+            self.assertEqual(
+                window.prompt_tree.item(2, 0).background().color().alpha(),
+                0,
+            )
+            rendered = window.prompt_tree.viewport().grab().toImage()
+            self.assertEqual(
+                rendered.pixelColor(hover_position).name(),
+                COLORS["surface_hover"],
+            )
+
+            window._set_prompt_hover(4)
+
+            self.assertEqual(
+                window.prompt_tree.item(
+                    hovered_row,
+                    0,
+                ).background().color().alpha(),
+                0,
+            )
+        finally:
+            window.destroy()
+            self.qt_application.processEvents()
+
+    def test_open_existing_is_prominent_without_custom_audio(self) -> None:
+        window = ToneSlapperWindow()
+        window.hide()
+        try:
+            self.assertFalse(window.workflow_slot.isVisible())
+            self.assertEqual(window.validate_button.property("role"), "path")
+
+            window.target_profile_id = TUNE_720BT_PROFILE.profile_id
+            window._refresh_prompt_rows()
+            window._update_buttons()
+            window.show()
+            self.qt_application.processEvents()
+
+            self.assertTrue(window.workflow_slot.isVisible())
+            self.assertIs(
+                window.workflow_stack.currentWidget(),
+                window.open_divider,
+            )
+            self.assertEqual(window.open_divider_label.text(), "OR")
+            self.assertEqual(window.validate_button.text(), "Open sound pack…")
+            self.assertEqual(
+                window.validate_button.property("role"),
+                "openProminent",
+            )
+            self.assertFalse(window.build_button.property("available"))
+            with patch.object(window, "_show_flying_tip") as show_tip:
+                window.upload_button.click()
+            self.assertTrue(window.upload_button.isEnabled())
+            show_tip.assert_called_once_with(
+                window.upload_button,
+                "build or open first",
+            )
+            self.assertGreaterEqual(
+                window.prompt_tree.viewport().height(),
+                sum(
+                    window.prompt_tree.rowHeight(row)
+                    for row in range(window.prompt_tree.rowCount())
+                ),
+            )
+            layout_before_assignment = (
+                window.prompt_tree.viewport().height(),
+                window.package_row.mapTo(window, QPoint(0, 0)).y(),
+                window.upload_button.mapTo(window, QPoint(0, 0)).y(),
+            )
+
+            window.assignments[0] = Path("power-on.wav")
+            window._invalidate_build()
+            self.qt_application.processEvents()
+            self.assertEqual(window.validate_button.property("role"), "path")
+            self.assertTrue(window.build_button.property("available"))
+            self.assertIs(
+                window.workflow_stack.currentWidget(),
+                window.build_button_row,
+            )
+            self.assertEqual(
+                (
+                    window.prompt_tree.viewport().height(),
+                    window.package_row.mapTo(window, QPoint(0, 0)).y(),
+                    window.upload_button.mapTo(window, QPoint(0, 0)).y(),
+                ),
+                layout_before_assignment,
+            )
+
+            window._reset_prompt(0)
+            self.assertEqual(
+                window.validate_button.property("role"),
+                "openProminent",
+            )
+            self.assertIs(
+                window.workflow_stack.currentWidget(),
+                window.open_divider,
+            )
+            layout_before_package = (
+                window.prompt_tree.viewport().height(),
+                window.build_button.mapTo(window, QPoint(0, 0)).y(),
+                window.upload_button.mapTo(window, QPoint(0, 0)).y(),
+            )
+
+            window.last_build = SimpleNamespace(
+                output=OEM_SAMPLE,
+                profile_id=TUNE_720BT_PROFILE.profile_id,
+            )
+            window.output_var.set(str(OEM_SAMPLE))
+            window._update_buttons()
+            self.qt_application.processEvents()
+            self.assertEqual(window.validate_button.property("role"), "path")
+            self.assertTrue(window.clear_package_button.isVisible())
+            self.assertEqual(
+                (
+                    window.prompt_tree.viewport().height(),
+                    window.build_button.mapTo(window, QPoint(0, 0)).y(),
+                    window.upload_button.mapTo(window, QPoint(0, 0)).y(),
+                ),
+                layout_before_package,
+            )
+            self.assertEqual(
+                window.clear_package_button.accessibleName(),
+                "Unload sound pack",
+            )
+
+            with patch.object(window, "open_existing") as open_existing:
+                window.clear_package_button.click()
+                self.qt_application.processEvents()
+            open_existing.assert_not_called()
+            self.assertIsNone(window.last_build)
+            self.assertFalse(window.clear_package_button.isVisible())
+            self.assertEqual(window.validate_button.text(), "Open sound pack…")
+            self.assertEqual(
+                window.validate_button.property("role"),
+                "openProminent",
+            )
+        finally:
+            window.destroy()
+            self.qt_application.processEvents()
+
+    def test_upload_expands_only_while_showing_progress(self) -> None:
+        window = ToneSlapperWindow()
+        window.show()
+        try:
+            self.qt_application.processEvents()
+            idle_width = window.upload_button.width()
+
+            self.assertLessEqual(window.build_button.width(), 480)
+            self.assertLessEqual(idle_width, 480)
+            self.assertLessEqual(window.package_row.width(), 480)
+            self.assertLessEqual(window.validate_button.width(), 480)
+            self.assertEqual(
+                window.recovery_button.width(),
+                window.recovery_button.sizeHint().width(),
+            )
+            upload_bottom = (
+                window.upload_button.mapTo(window, QPoint(0, 0)).y()
+                + window.upload_button.height()
+            )
+            recovery_top = window.recovery_button.mapTo(window, QPoint(0, 0)).y()
+            self.assertGreaterEqual(recovery_top - upload_bottom, 16)
+            self.assertFalse(window.upload_button_row.expanded)
+
+            window.upload_button.begin("Uploading…")
+            self.qt_application.processEvents()
+            self.assertTrue(window.upload_button_row.expanded)
+            self.assertGreater(window.upload_button.width(), idle_width)
+
+            window.upload_button.complete()
+            self.qt_application.processEvents()
+            self.assertFalse(window.upload_button_row.expanded)
+            self.assertLessEqual(window.upload_button.width(), 480)
+        finally:
+            window.destroy()
+            self.qt_application.processEvents()
 
     def test_close_is_blocked_during_upload_and_oem_restore(self) -> None:
         protected_states = (
@@ -137,14 +428,18 @@ class CoreTests(unittest.TestCase):
                 active_operation=active_operation,
                 oem_context=oem_context,
             ):
-                window = object.__new__(ToneSlapperWindow)
-                window.root = Mock()
-                window.active_operation = active_operation
-                window.busy = busy
-                window._oem_context = oem_context
+                window = SimpleNamespace(
+                    root=Mock(),
+                    active_operation=active_operation,
+                    busy=busy,
+                    _oem_context=oem_context,
+                )
+                window._close_is_blocked = lambda: ToneSlapperWindow._close_is_blocked(
+                    window
+                )
 
                 with patch("bt_tone_slapper.gui.messagebox.showwarning") as warning:
-                    window._request_close()
+                    ToneSlapperWindow._request_close(window)
 
                 warning.assert_called_once_with(
                     APP_NAME,
@@ -154,38 +449,44 @@ class CoreTests(unittest.TestCase):
                 window.root.destroy.assert_not_called()
 
     def test_close_remains_available_outside_write_operations(self) -> None:
-        window = object.__new__(ToneSlapperWindow)
-        window.root = Mock()
-        window.active_operation = "build"
-        window.busy = True
-        window._oem_context = "build"
+        window = SimpleNamespace(
+            root=Mock(),
+            active_operation="build",
+            busy=True,
+            _oem_context="build",
+        )
+        window._close_is_blocked = lambda: ToneSlapperWindow._close_is_blocked(
+            window
+        )
 
         with patch("bt_tone_slapper.gui.messagebox.showwarning") as warning:
-            window._request_close()
+            ToneSlapperWindow._request_close(window)
 
         warning.assert_not_called()
         window.root.destroy.assert_called_once_with()
 
     def test_write_confirmations_explain_risk_and_recovery(self) -> None:
-        window = object.__new__(ToneSlapperWindow)
+        window = SimpleNamespace(
+            device_var=SimpleNamespace(get=Mock(return_value="JBL Tune720BT")),
+            last_build=SimpleNamespace(
+                output=str(OEM_SAMPLE),
+                profile_id=TUNE_720BT_PROFILE.profile_id,
+                sha256=BASE_SHA256,
+                dry_run={"packet_count": 1},
+            ),
+            _run_background=Mock(),
+            _acquire_oem=Mock(),
+        )
         window._device_identifier = Mock(return_value="connected-device")
         window._selected_profile_id = Mock(
             return_value=TUNE_720BT_PROFILE.profile_id
         )
-        window.last_build = SimpleNamespace(
-            output=str(OEM_SAMPLE),
-            profile_id=TUNE_720BT_PROFILE.profile_id,
-            sha256=BASE_SHA256,
-            dry_run={"packet_count": 1},
-        )
-        window._run_background = Mock()
-        window._acquire_oem = Mock()
 
         with patch(
             "bt_tone_slapper.gui.messagebox.askyesno",
             return_value=False,
         ) as confirm:
-            window.upload()
+            ToneSlapperWindow.upload(window)
         upload_warning = confirm.call_args.args[1]
         self.assertIn("interrupted or incompatible write", upload_warning)
         self.assertIn("do not close the app", upload_warning)
@@ -196,7 +497,7 @@ class CoreTests(unittest.TestCase):
             "bt_tone_slapper.gui.messagebox.askyesno",
             return_value=False,
         ) as confirm:
-            window.restore()
+            ToneSlapperWindow.restore(window)
         restore_warning = confirm.call_args.args[1]
         self.assertIn("cryptographically verified", restore_warning)
         self.assertIn("do not close the app", restore_warning)
@@ -207,6 +508,46 @@ class CoreTests(unittest.TestCase):
         engine = test_engine()
         self.assertEqual(hashlib.sha256(engine.base_image.read_bytes()).hexdigest(), BASE_SHA256)
         self.assertTrue(validate_container(engine.base_image).valid)
+        expected_font_hashes = {
+            "fonts/dm-sans/DMSans-Variable.ttf": (
+                "8cd08d97e89c24d0aa92edd2f0f4c8ee6195eee9b7c9f154865a58b02f0c1c0d"
+            ),
+        }
+        self.assertEqual(set(FONT_ASSETS), set(expected_font_hashes))
+        for relative_path, expected_hash in expected_font_hashes.items():
+            font_path = ROOT / "assets" / relative_path
+            self.assertTrue(font_path.is_file())
+            self.assertEqual(
+                hashlib.sha256(font_path.read_bytes()).hexdigest(),
+                expected_hash,
+            )
+        self.assertTrue(
+            (ROOT / "assets" / "fonts" / "dm-sans" / "OFL.txt").is_file()
+        )
+        if sys.platform == "win32":
+            self.assertTrue(register_bundled_fonts())
+            self.assertEqual(BODY_FONT_FAMILY, "DM Sans")
+            self.assertEqual(EMPHASIS_FONT_FAMILY, "DM Sans")
+            self.assertEqual(body_family(), BODY_FONT_FAMILY)
+            self.assertEqual(emphasis_family(), EMPHASIS_FONT_FAMILY)
+            medium = body_font(10)
+            bold = emphasis_font(14)
+            self.assertEqual(
+                medium.variableAxisValue(OPTICAL_SIZE_AXIS),
+                10.0,
+            )
+            self.assertEqual(
+                medium.variableAxisValue(WEIGHT_AXIS),
+                500.0,
+            )
+            self.assertEqual(
+                bold.variableAxisValue(OPTICAL_SIZE_AXIS),
+                14.0,
+            )
+            self.assertEqual(
+                bold.variableAxisValue(WEIGHT_AXIS),
+                700.0,
+            )
         icon_png = ROOT / "assets" / "source" / "app_icon.png"
         icon_ico = ROOT / "assets" / "icons" / "app_icon.ico"
         self.assertTrue(icon_png.is_file())
@@ -311,17 +652,25 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(request.full_url, OEM_GITHUB_URL)
 
     def test_restore_oem_always_starts_with_manufacturer_download(self) -> None:
-        window = object.__new__(ToneSlapperWindow)
-        window.busy = False
-        window.engine = Mock()
+        acquired = Mock()
+        window = SimpleNamespace(
+            busy=False,
+            engine=Mock(),
+            _run_background=Mock(),
+            _pending_oem_action=None,
+            _oem_context=None,
+            _oem_acquired=acquired,
+        )
         window.engine.cached_oem = Mock()
         window.engine.download_official_oem = Mock()
-        window._run_background = Mock()
-        window._pending_oem_action = None
-        window._oem_context = None
         ready = Mock()
 
-        window._acquire_oem("restore", ready, always_download=True)
+        ToneSlapperWindow._acquire_oem(
+            window,
+            "restore",
+            ready,
+            always_download=True,
+        )
 
         window.engine.cached_oem.assert_not_called()
         self.assertIs(window._pending_oem_action, ready)
@@ -329,7 +678,7 @@ class CoreTests(unittest.TestCase):
         operation_name, operation, success = window._run_background.call_args.args
         self.assertEqual(operation_name, "oem-official")
         self.assertIs(operation, window.engine.download_official_oem)
-        self.assertEqual(success.__func__, ToneSlapperWindow._oem_acquired)
+        self.assertIs(success, acquired)
 
     def test_prompt_map_and_live_uuids(self) -> None:
         self.assertEqual(len(TUNE_720BT_PROFILE.prompt_labels), 11)
@@ -477,29 +826,41 @@ class CoreTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.values = ()
 
-            def configure(self, **options) -> None:
-                self.values = options["values"]
+            def blockSignals(self, _blocked: bool) -> None:
+                pass
 
-        selected = "JBL Tune720BT | 02:00:00:00:00:20 | Connected"
-        other = "JBL Tune720BT | 02:00:00:00:00:21 | Connected"
-        window = object.__new__(ToneSlapperWindow)
-        window.devices = {
-            selected: "02:00:00:00:00:20",
-            other: "02:00:00:00:00:21",
-        }
-        window.device_models = {
-            selected: "JBL Tune720BT",
-            other: "JBL Tune720BT",
-        }
-        window.device_var = FakeVariable(selected)
-        window.device_combo = FakeCombo()
+            def clear(self) -> None:
+                self.values = ()
 
-        window._remove_uploaded_device_from_scan()
+            def addItems(self, values) -> None:
+                self.values = tuple(values)
+
+            def setCurrentIndex(self, _index: int) -> None:
+                pass
+
+        selected = "JBL Tune720BT"
+        other = "JBL Tune720BT (2)"
+        window = SimpleNamespace(
+            devices={
+                selected: "02:00:00:00:00:20",
+                other: "02:00:00:00:00:21",
+            },
+            device_models={
+                selected: "JBL Tune720BT",
+                other: "JBL Tune720BT",
+            },
+            device_var=FakeVariable(selected),
+            device_combo=FakeCombo(),
+            _update_buttons=Mock(),
+        )
+
+        ToneSlapperWindow._remove_uploaded_device_from_scan(window)
 
         self.assertNotIn(selected, window.devices)
         self.assertNotIn(selected, window.device_models)
         self.assertEqual(window.device_combo.values, (other,))
         self.assertEqual(window.device_var.get(), "")
+        window._update_buttons.assert_called_once_with()
 
     def test_upload_completion_finishes_then_latches_success(self) -> None:
         class FakeRoot:
@@ -527,16 +888,19 @@ class CoreTests(unittest.TestCase):
             def reset(self, *, enabled: bool) -> None:
                 self.reset_calls.append(enabled)
 
-        window = object.__new__(ToneSlapperWindow)
-        window.root = FakeRoot()
-        window.upload_button = FakeProgressButton()
-        window._upload_finish_job = None
-        window._upload_success_latched = False
-        window._remove_uploaded_device_from_scan = Mock()
-        window._reset_operation_ui = Mock()
+        window = SimpleNamespace(
+            root=FakeRoot(),
+            upload_button=FakeProgressButton(),
+            _upload_finish_job=None,
+            _upload_success_latched=False,
+            _remove_uploaded_device_from_scan=Mock(),
+            _reset_operation_ui=Mock(),
+            UPLOAD_FINISH_MS=ToneSlapperWindow.UPLOAD_FINISH_MS,
+            UPLOAD_FINISH_INTERVAL_MS=ToneSlapperWindow.UPLOAD_FINISH_INTERVAL_MS,
+        )
 
         with patch("bt_tone_slapper.gui.time.monotonic", side_effect=(100.0, 100.0)):
-            window._upload_complete(None)
+            ToneSlapperWindow._upload_complete(window, None)
 
         self.assertEqual(window.UPLOAD_FINISH_MS, 6000)
         self.assertEqual(window.root.delay, window.UPLOAD_FINISH_INTERVAL_MS)
@@ -553,7 +917,7 @@ class CoreTests(unittest.TestCase):
             preserve_upload_status=True
         )
 
-        window._reset_upload_success()
+        ToneSlapperWindow._reset_upload_success(window)
         self.assertFalse(window._upload_success_latched)
         self.assertEqual(window.upload_button.reset_calls, [False])
 
@@ -646,15 +1010,52 @@ class CoreTests(unittest.TestCase):
                 "CAF",
             ),
         )
-        window = object.__new__(ToneSlapperWindow)
+        window = SimpleNamespace(root=Mock(), _legal_window=None)
         with patch("bt_tone_slapper.gui.webbrowser.open", return_value=True) as open_url:
-            window.donate()
+            ToneSlapperWindow.donate(window)
         open_url.assert_called_once_with(DONATE_URL, new=2)
-        window.root = Mock()
         window._legal_window = Mock()
         with patch("bt_tone_slapper.gui.webbrowser.open", return_value=True) as open_url:
-            window.open_source_repository()
+            ToneSlapperWindow.open_source_repository(window)
         open_url.assert_called_once_with(PROJECT_URL, new=2)
+
+    def test_help_offers_build_or_open_paths_and_links_project(self) -> None:
+        window = ToneSlapperWindow()
+        window.show_help()
+        try:
+            self.qt_application.processEvents()
+            headings = {
+                label.text()
+                for label in window._help_window.findChildren(QLabel)
+                if label.objectName() == "helpHeading"
+            }
+            bodies = "\n".join(
+                label.text()
+                for label in window._help_window.findChildren(QLabel)
+                if label.objectName() == "helpBody"
+            )
+
+            self.assertIn("2. Choose sounds (optional)", headings)
+            self.assertIn("3. Build or open a sound pack", headings)
+            self.assertIn(
+                "Skip this step when using an existing .BIN sound pack.",
+                bodies,
+            )
+            self.assertIn(
+                "Opening a sound pack does not require choosing sounds or building.",
+                bodies,
+            )
+            self.assertIn("Original project:", window._help_project_link.text())
+            with patch(
+                "bt_tone_slapper.gui.webbrowser.open",
+                return_value=True,
+            ) as open_url:
+                window._help_project_link.linkActivated.emit(PROJECT_URL)
+            open_url.assert_called_once_with(PROJECT_URL, new=2)
+        finally:
+            window._help_window.close()
+            window.destroy()
+            self.qt_application.processEvents()
 
     def test_project_license_and_attribution_notices(self) -> None:
         license_text = (PROJECT_ROOT / "LICENSE").read_text(encoding="utf-8")
@@ -691,42 +1092,69 @@ class CoreTests(unittest.TestCase):
             },
         )
         build_script = (PROJECT_ROOT / "build_portable.ps1").read_text(encoding="utf-8")
+        self.assertIn(
+            '--add-data "$Root\\assets\\fonts;assets\\fonts"',
+            build_script,
+        )
+        self.assertIn("--exclude-module tkinter", build_script)
         for filename in ("LICENSE", "ATTRIBUTION.md", "THIRD_PARTY.md"):
             self.assertIn(f'--add-data "$Root\\{filename};."', build_script)
+        requirements = (PROJECT_ROOT / "requirements-build.txt").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("PySide6-Essentials==6.11.1", requirements)
+        self.assertNotIn("PySide6-Addons", requirements)
+        self.assertIn("Qt for Python", third_party_text)
 
     def test_legal_notices_window_displays_all_documents(self) -> None:
-        root = Tk()
-        root.withdraw()
+        window = ToneSlapperWindow()
+        window.hide()
         try:
-            window = ToneSlapperWindow(root)
             window.show_legal_notices()
-            root.update_idletasks()
+            self.qt_application.processEvents()
 
             self.assertIsNotNone(window._legal_window)
             self.assertEqual(
-                window._legal_window.title(),
+                window._legal_window.windowTitle(),
                 f"{APP_NAME} - Legal Notices",
             )
             self.assertIn(
                 "GNU GENERAL PUBLIC LICENSE",
-                window._legal_text.get("1.0", "end-1c"),
+                window._legal_text.toPlainText(),
             )
 
-            window._legal_buttons["Attribution"].invoke()
+            window._legal_buttons["Attribution"].click()
+            self.qt_application.processEvents()
             self.assertIn(
                 f"Originally created by {APP_AUTHOR}",
-                window._legal_text.get("1.0", "end-1c"),
+                window._legal_text.toPlainText(),
             )
-            window._legal_buttons["Third-party notices"].invoke()
-            third_party_text = window._legal_text.get("1.0", "end-1c")
+            window._legal_buttons["Third-party notices"].click()
+            self.qt_application.processEvents()
+            third_party_text = window._legal_text.toPlainText()
             self.assertIn("FFmpeg", third_party_text)
             self.assertIn("Material Symbols", third_party_text)
-            self.assertEqual(
-                str(window._legal_text.cget("state")),
-                "disabled",
-            )
+            self.assertTrue(window._legal_text.isReadOnly())
         finally:
-            root.destroy()
+            window.destroy()
+            self.qt_application.processEvents()
+
+    def test_qt_font_uses_fractional_pair_kerning(self) -> None:
+        font = body_font(14)
+        metrics = QFontMetricsF(font)
+        separate_width = metrics.horizontalAdvance("A") + metrics.horizontalAdvance("V")
+        pair_width = metrics.horizontalAdvance("AV")
+
+        self.assertTrue(font.kerning())
+        self.assertEqual(
+            font.hintingPreference(),
+            QFont.HintingPreference.PreferVerticalHinting,
+        )
+        self.assertEqual(
+            font.styleStrategy(),
+            GRAYSCALE_ANTIALIASING,
+        )
+        self.assertGreater(separate_width, pair_width)
 
     def test_scan_merges_remembered_ble_devices(self) -> None:
         class FakeScanner:

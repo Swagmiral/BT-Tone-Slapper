@@ -8,7 +8,7 @@ Portable Windows application for replacing event sounds on supported Bluetooth a
 > You do **not** need to build this project to flash your headphones.
 > Use the ready-to-use EXE from the `dist` folder.
 
-1. Download the ready-to-use app: [dist/BTToneSlapper.exe](dist/BTToneSlapper.exe)
+1. Download the ready-to-use app: [dist/BT Tone Slapper.exe](dist/BT%20Tone%20Slapper.exe)
 2. Connect your headphones.
 3. Choose a complete sound pack from [Custom Sound Packs](Custom%20Sound%20Packs).
 4. Flash the sound pack.
@@ -21,7 +21,6 @@ OEM sound packs are also included in case you want to restore the original sound
 - **A sound pack** is a complete `.bin` file made for a specific headphone model.
 - **A single sound file** is only source material, such as one `.wav` or `.mp3`. You do not flash a single sound file directly.
 - **Build instructions** are only for developers who want to modify or rebuild the app.
-
 
 ## Features
 
@@ -59,7 +58,7 @@ Run:
 The script creates an isolated local build environment and writes:
 
 ```text
-dist\BTToneSlapper.exe
+dist\BT Tone Slapper.exe
 ```
 
 Python, Bleak, WinRT bindings, FFmpeg, the LZMA encoder, and icons are bundled into
@@ -69,7 +68,7 @@ The destination PC does not need Python or additional packages, the .exe is self
 ## Verify The EXE
 
 ```powershell
-.\dist\BTToneSlapper.exe --self-test .\self-test.json
+& ".\dist\BT Tone Slapper.exe" --self-test .\self-test.json
 Get-Content .\self-test.json
 ```
 

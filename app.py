@@ -22,22 +22,21 @@ def self_test(output: Path) -> None:
     from bleak.backends.winrt.scanner import BleakScannerWinRT
 
     checkpoint("bleak-imported")
-    from tkinter import Tk
-
-    from bt_tone_slapper.gui import ToneSlapperWindow
+    from bt_tone_slapper.gui import ToneSlapperWindow, create_application
     from bt_tone_slapper.workflow import ToneSlapperEngine
 
     checkpoint("application-imported")
-    gui_root = Tk()
-    gui_root.withdraw()
-    app_window = ToneSlapperWindow(gui_root)
-    gui_root.update_idletasks()
+    gui_application = create_application([])
+    app_window = ToneSlapperWindow()
+    app_window.hide()
+    gui_application.processEvents()
     gui_size = {
-        "requested_width": gui_root.winfo_reqwidth(),
-        "requested_height": gui_root.winfo_reqheight(),
-        "theme": app_window.root.tk.call("ttk::style", "theme", "use"),
+        "requested_width": app_window.sizeHint().width(),
+        "requested_height": app_window.sizeHint().height(),
+        "theme": gui_application.style().objectName(),
     }
-    gui_root.destroy()
+    app_window.destroy()
+    gui_application.processEvents()
     checkpoint("gui-constructed", **gui_size)
     engine = ToneSlapperEngine()
     checkpoint("assets-verified")
