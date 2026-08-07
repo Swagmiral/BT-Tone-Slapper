@@ -2,7 +2,7 @@
 
 Copyright (C) 2026 Yaroslav Tselovanskyi
 
-BT Tone Slapper is licensed under the GNU General Public License version 3
+Tone Slapper is licensed under the GNU General Public License version 3
 only, as provided in `LICENSE`, supplemented by these terms under sections
 7(b) and 7(c) of that license.
 
@@ -15,8 +15,8 @@ Anyone who conveys this program, a modified version, or a public source-code
 fork must preserve the following notice in the primary README at a reasonably
 prominent location:
 
-> BT Tone Slapper was originally created by Yaroslav Tselovanskyi.
-> Original project: https://github.com/Tselovanskyi/BT-Tone-Slapper
+> Tone Slapper was originally created by Yaroslav Tselovanskyi.
+> Original project: https://github.com/Tselovanskyi/ToneSlapper
 
 No account username or handle is required as part of the original-author name.
 
@@ -33,7 +33,7 @@ normal user interface:
 
 > Originally created by Yaroslav Tselovanskyi
 >
-> Original project: https://github.com/Tselovanskyi/BT-Tone-Slapper
+> Original project: https://github.com/Tselovanskyi/ToneSlapper
 
 The attribution does not need to remain continuously on screen. It must remain
 readily accessible to users and must not be less prominent than equivalent

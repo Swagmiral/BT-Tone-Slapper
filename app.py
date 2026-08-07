@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 
-from bt_tone_slapper import APP_VERSION
+from tone_slapper import APP_VERSION
 
 
 def self_test(output: Path) -> None:
@@ -22,8 +22,8 @@ def self_test(output: Path) -> None:
     from bleak.backends.winrt.scanner import BleakScannerWinRT
 
     checkpoint("bleak-imported")
-    from bt_tone_slapper.gui import ToneSlapperWindow, create_application
-    from bt_tone_slapper.workflow import ToneSlapperEngine
+    from tone_slapper.gui import ToneSlapperWindow, create_application
+    from tone_slapper.workflow import ToneSlapperEngine
 
     checkpoint("application-imported")
     gui_application = create_application([])
@@ -76,7 +76,7 @@ def run() -> None:
     if len(sys.argv) == 2 and sys.argv[1].startswith("--self-test="):
         self_test(Path(sys.argv[1].split("=", 1)[1]))
         return
-    from bt_tone_slapper.gui import main
+    from tone_slapper.gui import main
 
     main()
 

@@ -7,7 +7,7 @@ Files are grouped by supported device model:
 
 - `JBL Tune 720BT/English_prompt_v0.0.5.bin`
 
-Do not modify these files. BT Tone Slapper verifies the expected file size,
+Do not modify these files. Tone Slapper verifies the expected file size,
 SHA-256 hash, and container structure before allowing recovery use.
 
 This is the repository backup location. When the portable application

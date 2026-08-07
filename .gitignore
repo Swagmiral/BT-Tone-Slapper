@@ -1,7 +1,7 @@
 /.venv/
 /build/
 /dist/*
-!/dist/BT Tone Slapper.exe
+!/dist/ToneSlapper.exe
 /*.spec
 /.pytest_cache/
 /__pycache__/

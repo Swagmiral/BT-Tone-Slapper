@@ -23,7 +23,7 @@ if ($LASTEXITCODE -ne 0) {
     --noconfirm `
     --onefile `
     --windowed `
-    --name "BT Tone Slapper" `
+    --name ToneSlapper `
     --icon "$Root\assets\icons\app_icon.ico" `
     --paths "$Root" `
     --exclude-module tkinter `
@@ -43,7 +43,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Portable build failed"
 }
 
-$Exe = Join-Path $Root "dist\BT Tone Slapper.exe"
+$Exe = Join-Path $Root "dist\ToneSlapper.exe"
 $Hash = Get-FileHash $Exe -Algorithm SHA256
 Write-Host "Built: $Exe"
 Write-Host "SHA-256: $($Hash.Hash.ToLowerInvariant())"

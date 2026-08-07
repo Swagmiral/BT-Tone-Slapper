@@ -20,16 +20,16 @@ from PySide6.QtWidgets import QLabel
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from bt_tone_slapper import APP_AUTHOR, APP_NAME, LICENSE_NAME, PROJECT_URL
-from bt_tone_slapper.bluetooth import DiscoveredDevice, scan_devices
-from bt_tone_slapper.container import build_container, validate_container
-from bt_tone_slapper.device_profiles import (
+from tone_slapper import APP_AUTHOR, APP_NAME, LICENSE_NAME, PROJECT_URL
+from tone_slapper.bluetooth import DiscoveredDevice, scan_devices
+from tone_slapper.container import build_container, validate_container
+from tone_slapper.device_profiles import (
     TUNE_720BT_PROFILE,
     normalize_device_name,
     resolve_device_profile,
 )
-from bt_tone_slapper.errors import UserFacingError, user_error_message
-from bt_tone_slapper.fonts import (
+from tone_slapper.errors import UserFacingError, user_error_message
+from tone_slapper.fonts import (
     BODY_FONT_FAMILY,
     EMPHASIS_FONT_FAMILY,
     FONT_ASSETS,
@@ -42,7 +42,7 @@ from bt_tone_slapper.fonts import (
     emphasis_family,
     register_bundled_fonts,
 )
-from bt_tone_slapper.gui import (
+from tone_slapper.gui import (
     CLOSE_BLOCKED_TEXT,
     DONATE_URL,
     LEGAL_NOTICE_FILES,
@@ -52,17 +52,17 @@ from bt_tone_slapper.gui import (
     create_application,
     load_legal_documents,
 )
-from bt_tone_slapper.protocol import SERVICE_UUID, WRITE_UUID, NOTIFY_UUID
-from bt_tone_slapper.theme import COLORS
-from bt_tone_slapper.oem import (
+from tone_slapper.protocol import SERVICE_UUID, WRITE_UUID, NOTIFY_UUID
+from tone_slapper.theme import COLORS
+from tone_slapper.oem import (
     OEM_GITHUB_MANUAL_URL,
     OEM_GITHUB_URL,
     OEM_SERVER_URL,
     OemAcquisitionError,
     OemStore,
 )
-from bt_tone_slapper.uploader import build_dry_run
-from bt_tone_slapper.workflow import BASE_SHA256, ToneSlapperEngine
+from tone_slapper.uploader import build_dry_run
+from tone_slapper.workflow import BASE_SHA256, ToneSlapperEngine
 
 
 ROOT = PROJECT_ROOT
@@ -146,7 +146,7 @@ class CoreTests(unittest.TestCase):
                 )
             )
             self.assertFalse(window.validate_button.property("available"))
-            with patch("bt_tone_slapper.gui.filedialog.askopenfilename") as choose:
+            with patch("tone_slapper.gui.filedialog.askopenfilename") as choose:
                 window._choose_audio_for(0)
             choose.assert_not_called()
 
@@ -381,6 +381,74 @@ class CoreTests(unittest.TestCase):
             window.destroy()
             self.qt_application.processEvents()
 
+    def test_scan_selects_first_supported_without_blocking_workflow(self) -> None:
+        window = ToneSlapperWindow()
+        window.show()
+        try:
+            unsupported = DiscoveredDevice(
+                address="02:00:00:00:00:30",
+                name="JBL Tune 770NC",
+                rssi=-20,
+                service_uuids=(),
+            )
+            first = DiscoveredDevice(
+                address="02:00:00:00:00:31",
+                name="JBL Tune720BT",
+                rssi=-40,
+                service_uuids=(),
+            )
+            second = DiscoveredDevice(
+                address="02:00:00:00:00:32",
+                name="JBL Tune720BT",
+                rssi=-45,
+                service_uuids=(),
+            )
+            third = DiscoveredDevice(
+                address="02:00:00:00:00:33",
+                name="JBL Tune720BT",
+                rssi=-50,
+                service_uuids=(),
+            )
+
+            window.scan_active = True
+            window._update_buttons()
+            window._scan_device_discovered(unsupported)
+            self.assertEqual(window.device_combo.count(), 0)
+            self.assertIsNone(window.target_profile_id)
+
+            window._scan_device_discovered(first)
+            self.qt_application.processEvents()
+            self.assertEqual(window.device_var.get(), first.name)
+            self.assertEqual(
+                window.target_profile_id,
+                TUNE_720BT_PROFILE.profile_id,
+            )
+            self.assertTrue(window.device_combo.isEnabled())
+            self.assertFalse(window.scan_button.isEnabled())
+            self.assertTrue(window.validate_button.isEnabled())
+            self.assertTrue(window.prompt_tree.isEnabled())
+
+            window.assignments[0] = Path("custom.wav")
+            window._update_buttons()
+            self.assertTrue(window.build_button.isEnabled())
+            self.assertTrue(window.build_button.property("available"))
+
+            window._scan_device_discovered(second)
+            self.assertEqual(window.device_combo.count(), 2)
+            self.assertEqual(window.device_var.get(), first.name)
+
+            second_display = f"{second.name} (2)"
+            window.device_combo.setCurrentText(second_display)
+            self.qt_application.processEvents()
+            self.assertEqual(window.device_var.get(), second_display)
+
+            window._scan_device_discovered(third)
+            self.assertEqual(window.device_combo.count(), 3)
+            self.assertEqual(window.device_var.get(), second_display)
+        finally:
+            window.destroy()
+            self.qt_application.processEvents()
+
     def test_upload_expands_only_while_showing_progress(self) -> None:
         window = ToneSlapperWindow()
         window.show()
@@ -438,7 +506,7 @@ class CoreTests(unittest.TestCase):
                     window
                 )
 
-                with patch("bt_tone_slapper.gui.messagebox.showwarning") as warning:
+                with patch("tone_slapper.gui.messagebox.showwarning") as warning:
                     ToneSlapperWindow._request_close(window)
 
                 warning.assert_called_once_with(
@@ -459,7 +527,7 @@ class CoreTests(unittest.TestCase):
             window
         )
 
-        with patch("bt_tone_slapper.gui.messagebox.showwarning") as warning:
+        with patch("tone_slapper.gui.messagebox.showwarning") as warning:
             ToneSlapperWindow._request_close(window)
 
         warning.assert_not_called()
@@ -483,7 +551,7 @@ class CoreTests(unittest.TestCase):
         )
 
         with patch(
-            "bt_tone_slapper.gui.messagebox.askyesno",
+            "tone_slapper.gui.messagebox.askyesno",
             return_value=False,
         ) as confirm:
             ToneSlapperWindow.upload(window)
@@ -494,7 +562,7 @@ class CoreTests(unittest.TestCase):
         window._run_background.assert_not_called()
 
         with patch(
-            "bt_tone_slapper.gui.messagebox.askyesno",
+            "tone_slapper.gui.messagebox.askyesno",
             return_value=False,
         ) as confirm:
             ToneSlapperWindow.restore(window)
@@ -604,7 +672,7 @@ class CoreTests(unittest.TestCase):
             cache.write_bytes(b"invalid cache")
             store = OemStore(cache)
             with patch(
-                "bt_tone_slapper.oem.urlopen",
+                "tone_slapper.oem.urlopen",
                 return_value=FakeDownloadResponse(payload),
             ) as downloader:
                 image = store.download_from_manufacturer()
@@ -624,7 +692,7 @@ class CoreTests(unittest.TestCase):
             cache.write_bytes(payload)
             store = OemStore(cache)
             with patch(
-                "bt_tone_slapper.oem.urlopen",
+                "tone_slapper.oem.urlopen",
                 return_value=FakeDownloadResponse(bytes(changed)),
             ):
                 with self.assertRaisesRegex(
@@ -641,7 +709,7 @@ class CoreTests(unittest.TestCase):
             cache = Path(temporary) / OEM_SAMPLE.name
             store = OemStore(cache)
             with patch(
-                "bt_tone_slapper.oem.urlopen",
+                "tone_slapper.oem.urlopen",
                 return_value=FakeDownloadResponse(payload),
             ) as downloader:
                 image = store.download_from_github()
@@ -804,12 +872,29 @@ class CoreTests(unittest.TestCase):
             rssi=-30,
             service_uuids=(),
         )
-        scanner = AsyncMock(return_value=[supported, unsupported])
-        with patch("bt_tone_slapper.workflow.scan_devices", scanner):
-            results = ToneSlapperEngine.scan(timeout=0)
+        reported = []
+
+        async def scan_result(**options):
+            callback = options.get("on_discovered")
+            if callback is not None:
+                callback(supported)
+                callback(unsupported)
+            return [supported, unsupported]
+
+        scanner = AsyncMock(side_effect=scan_result)
+        with patch("tone_slapper.workflow.scan_devices", scanner):
+            results = ToneSlapperEngine.scan(
+                timeout=0,
+                on_discovered=reported.append,
+            )
 
         self.assertEqual(results, [supported])
-        scanner.assert_awaited_once_with(timeout=0, name_contains="JBL")
+        self.assertEqual(reported, [supported])
+        scanner.assert_awaited_once()
+        options = scanner.await_args.kwargs
+        self.assertEqual(options["timeout"], 0)
+        self.assertEqual(options["name_contains"], "JBL")
+        self.assertTrue(callable(options["on_discovered"]))
 
     def test_completed_upload_removes_stale_device_address(self) -> None:
         class FakeVariable:
@@ -899,7 +984,7 @@ class CoreTests(unittest.TestCase):
             UPLOAD_FINISH_INTERVAL_MS=ToneSlapperWindow.UPLOAD_FINISH_INTERVAL_MS,
         )
 
-        with patch("bt_tone_slapper.gui.time.monotonic", side_effect=(100.0, 100.0)):
+        with patch("tone_slapper.gui.time.monotonic", side_effect=(100.0, 100.0)):
             ToneSlapperWindow._upload_complete(window, None)
 
         self.assertEqual(window.UPLOAD_FINISH_MS, 6000)
@@ -907,7 +992,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(window._upload_finish_job, "finish-job")
         window._remove_uploaded_device_from_scan.assert_called_once_with()
 
-        with patch("bt_tone_slapper.gui.time.monotonic", return_value=106.0):
+        with patch("tone_slapper.gui.time.monotonic", return_value=106.0):
             window.root.callback()
 
         self.assertTrue(window.upload_button.completed)
@@ -977,15 +1062,15 @@ class CoreTests(unittest.TestCase):
     def test_help_formats_and_support_link(self) -> None:
         self.assertEqual(DONATE_URL, "https://donatello.to/polymernyk")
         self.assertEqual(APP_AUTHOR, "Yaroslav Tselovanskyi")
-        self.assertEqual(PROJECT_URL, "https://github.com/Tselovanskyi/BT-Tone-Slapper")
+        self.assertEqual(PROJECT_URL, "https://github.com/Tselovanskyi/ToneSlapper")
         self.assertTrue(
             OEM_GITHUB_URL.startswith(
-                "https://raw.githubusercontent.com/Tselovanskyi/BT-Tone-Slapper/"
+                "https://raw.githubusercontent.com/Tselovanskyi/ToneSlapper/"
             )
         )
         self.assertTrue(
             OEM_GITHUB_MANUAL_URL.startswith(
-                "https://github.com/Tselovanskyi/BT-Tone-Slapper/"
+                "https://github.com/Tselovanskyi/ToneSlapper/"
             )
         )
         self.assertEqual(
@@ -1011,11 +1096,11 @@ class CoreTests(unittest.TestCase):
             ),
         )
         window = SimpleNamespace(root=Mock(), _legal_window=None)
-        with patch("bt_tone_slapper.gui.webbrowser.open", return_value=True) as open_url:
+        with patch("tone_slapper.gui.webbrowser.open", return_value=True) as open_url:
             ToneSlapperWindow.donate(window)
         open_url.assert_called_once_with(DONATE_URL, new=2)
         window._legal_window = Mock()
-        with patch("bt_tone_slapper.gui.webbrowser.open", return_value=True) as open_url:
+        with patch("tone_slapper.gui.webbrowser.open", return_value=True) as open_url:
             ToneSlapperWindow.open_source_repository(window)
         open_url.assert_called_once_with(PROJECT_URL, new=2)
 
@@ -1047,7 +1132,7 @@ class CoreTests(unittest.TestCase):
             )
             self.assertIn("Original project:", window._help_project_link.text())
             with patch(
-                "bt_tone_slapper.gui.webbrowser.open",
+                "tone_slapper.gui.webbrowser.open",
                 return_value=True,
             ) as open_url:
                 window._help_project_link.linkActivated.emit(PROJECT_URL)
@@ -1063,7 +1148,7 @@ class CoreTests(unittest.TestCase):
         third_party_text = (PROJECT_ROOT / "THIRD_PARTY.md").read_text(encoding="utf-8")
         readme_text = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
         notice = (
-            "BT Tone Slapper was originally created by "
+            "Tone Slapper was originally created by "
             "Yaroslav Tselovanskyi."
         )
         self.assertIn("GNU GENERAL PUBLIC LICENSE", license_text)
@@ -1190,6 +1275,77 @@ class CoreTests(unittest.TestCase):
             )
         )
         self.assertEqual(results, [remembered])
+
+    def test_scan_streams_live_devices_before_the_scan_stops(self) -> None:
+        first_device = SimpleNamespace(
+            address="02:00:00:00:00:40",
+            name="JBL Tune720BT",
+        )
+        first_advertisement = SimpleNamespace(
+            local_name=None,
+            rssi=-42,
+            service_uuids=(),
+        )
+        second_device = SimpleNamespace(
+            address="02:00:00:00:00:41",
+            name="JBL Tune720BT",
+        )
+        second_advertisement = SimpleNamespace(
+            local_name=None,
+            rssi=-48,
+            service_uuids=(),
+        )
+
+        class IncrementalScanner:
+            instance = None
+
+            def __init__(
+                self,
+                detection_callback,
+                *,
+                scanning_mode,
+            ) -> None:
+                self.callback = detection_callback
+                self.scanning_mode = scanning_mode
+                self.started = False
+                self.stopped = False
+                self.discovered_devices_and_advertisement_data = {}
+                type(self).instance = self
+
+            async def start(self) -> None:
+                self.started = True
+                for device, advertisement in (
+                    (first_device, first_advertisement),
+                    (second_device, second_advertisement),
+                ):
+                    self.discovered_devices_and_advertisement_data[
+                        device.address
+                    ] = (device, advertisement)
+                    self.callback(device, advertisement)
+
+            async def stop(self) -> None:
+                self.stopped = True
+
+        async def connected_provider():
+            return {"jbltune720bt"}
+
+        reported = []
+        results = asyncio.run(
+            scan_devices(
+                timeout=0,
+                name_contains="JBL",
+                scanner=IncrementalScanner,
+                cached_provider=lambda: [],
+                connected_provider=connected_provider,
+                on_discovered=reported.append,
+            )
+        )
+
+        self.assertEqual(reported, results)
+        self.assertEqual(len(results), 2)
+        self.assertTrue(IncrementalScanner.instance.started)
+        self.assertTrue(IncrementalScanner.instance.stopped)
+        self.assertEqual(IncrementalScanner.instance.scanning_mode, "active")
 
     def test_live_scan_replaces_remembered_model(self) -> None:
         live_device = SimpleNamespace(
