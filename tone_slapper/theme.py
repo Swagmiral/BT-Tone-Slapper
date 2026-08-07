@@ -19,15 +19,18 @@ COLORS = {
     "border": "#303030",
     "text": "#f4f4f4",
     "muted": "#9a9a9a",
-    "accent": "#ff5f3a",
-    "accent_hover": "#ff7657",
-    "accent_pressed": "#e74d2b",
+    "accent": "#007f9e",
+    "accent_hover": "#009cbe",
+    "accent_pressed": "#00637a",
+    "accent_glow": "#00b0f5",
+    "accent_text": "#67d4ea",
     "danger": "#c63f4b",
     "danger_hover": "#db5360",
     "success": "#2f7d4a",
     "success_hover": "#388f57",
     "success_pressed": "#276b3f",
-    "disabled": "#5e5e5e",
+    "disabled": "#383838",
+    "disabled_surface": "#181818",
     "selection": "#333333",
 }
 
@@ -108,9 +111,7 @@ def apply_dark_theme(application: QApplication) -> None:
 
         QLabel#promptEmpty {{
             background: transparent;
-            color: {COLORS["text"]};
-            font-size: 18pt;
-            font-weight: 700;
+            color: {COLORS["muted"]};
         }}
 
         QLabel#helpTitle {{
@@ -146,12 +147,12 @@ def apply_dark_theme(application: QApplication) -> None:
         QPushButton {{
             min-height: 42px;
             border: 0;
-            border-radius: 0;
+            border-radius: 8px;
             padding: 0 14px;
             background: {COLORS["surface_hover"]};
             color: {COLORS["text"]};
-            font-size: 14pt;
-            font-weight: 700;
+            font-size: 10pt;
+            font-weight: 500;
             outline: none;
         }}
 
@@ -164,18 +165,18 @@ def apply_dark_theme(application: QApplication) -> None:
         }}
 
         QPushButton:disabled {{
-            background: #2a2a2a;
+            background: {COLORS["disabled_surface"]};
             color: {COLORS["disabled"]};
         }}
 
         QPushButton[available="false"] {{
-            background: #2a2a2a;
+            background: {COLORS["disabled_surface"]};
             color: {COLORS["disabled"]};
         }}
 
         QPushButton[available="false"]:hover,
         QPushButton[available="false"]:pressed {{
-            background: #2a2a2a;
+            background: {COLORS["disabled_surface"]};
             color: {COLORS["disabled"]};
         }}
 
@@ -220,6 +221,7 @@ def apply_dark_theme(application: QApplication) -> None:
             padding: 0 8px;
             background: transparent;
             color: {COLORS["muted"]};
+            font-weight: 700;
         }}
 
         QPushButton[role="path"]:hover {{
@@ -244,7 +246,7 @@ def apply_dark_theme(application: QApplication) -> None:
             padding: 0 8px;
             background: transparent;
             color: {COLORS["accent_hover"]};
-            font-size: 14pt;
+            font-size: 10pt;
             font-weight: 700;
         }}
 
@@ -302,6 +304,13 @@ def apply_dark_theme(application: QApplication) -> None:
         QPushButton#buildButton,
         QPushButton#scanButton {{
             border-radius: 8px;
+        }}
+
+        QPushButton#scanButton[scanning="true"],
+        QPushButton#scanButton[scanning="true"]:disabled {{
+            background: {COLORS["surface_hover"]};
+            color: {COLORS["accent_text"]};
+            font-weight: 700;
         }}
 
         QPushButton[role="recovery"] {{
@@ -400,8 +409,6 @@ def apply_dark_theme(application: QApplication) -> None:
             background: transparent;
             alternate-background-color: transparent;
             color: {COLORS["text"]};
-            font-size: 10pt;
-            font-weight: 500;
         }}
 
         QTableWidget::item {{
@@ -437,8 +444,6 @@ def apply_dark_theme(application: QApplication) -> None:
             padding: 0 10px;
             background: transparent;
             color: {COLORS["text"]};
-            font-size: 10pt;
-            font-weight: 700;
         }}
 
         QAbstractScrollArea::corner {{

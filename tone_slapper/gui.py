@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -51,7 +52,7 @@ from .device_profiles import (
     resolve_device_profile,
 )
 from .errors import user_error_message
-from .fonts import apply_variable_font_axes, emphasis_font
+from .fonts import apply_variable_font_axes, body_font, emphasis_font, heavy_font
 from .oem import OEM_GITHUB_MANUAL_URL, OemImage
 from .resources import asset_path, bundled_file_path
 from .theme import (
@@ -68,6 +69,7 @@ from .widgets import (
     PromptTable,
     ResetButton,
     RoundedPanel,
+    UppercaseButton,
 )
 from .workflow import BASE_SHA256, BuildResult, ToneSlapperEngine
 
@@ -127,16 +129,58 @@ def _qt_parent(parent) -> QWidget | None:
 
 class _MessageBoxAdapter:
     @staticmethod
+    def _show(
+        title: str,
+        message: str,
+        *,
+        icon: QMessageBox.Icon,
+        buttons: QMessageBox.StandardButton = QMessageBox.StandardButton.Ok,
+        default: QMessageBox.StandardButton = QMessageBox.StandardButton.NoButton,
+        parent=None,
+    ) -> QMessageBox.StandardButton:
+        owner = _qt_parent(parent)
+        dialog = QMessageBox(owner)
+        dialog.setWindowTitle(title)
+        dialog.setText(message)
+        dialog.setIcon(icon)
+        dialog.setStandardButtons(buttons)
+        if default != QMessageBox.StandardButton.NoButton:
+            dialog.setDefaultButton(default)
+        if owner is not None:
+            dialog.setWindowIcon(owner.windowIcon())
+        for button in dialog.buttons():
+            button.setText(button.text().upper())
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        apply_variable_font_axes(dialog)
+        QTimer.singleShot(0, lambda: apply_dark_title_bar(dialog))
+        return QMessageBox.StandardButton(dialog.exec())
+
+    @staticmethod
     def showerror(title: str, message: str, *, parent=None) -> None:
-        QMessageBox.critical(_qt_parent(parent), title, message)
+        _MessageBoxAdapter._show(
+            title,
+            message,
+            icon=QMessageBox.Icon.Critical,
+            parent=parent,
+        )
 
     @staticmethod
     def showwarning(title: str, message: str, *, parent=None) -> None:
-        QMessageBox.warning(_qt_parent(parent), title, message)
+        _MessageBoxAdapter._show(
+            title,
+            message,
+            icon=QMessageBox.Icon.Warning,
+            parent=parent,
+        )
 
     @staticmethod
     def showinfo(title: str, message: str, *, parent=None) -> None:
-        QMessageBox.information(_qt_parent(parent), title, message)
+        _MessageBoxAdapter._show(
+            title,
+            message,
+            icon=QMessageBox.Icon.Information,
+            parent=parent,
+        )
 
     @staticmethod
     def askyesno(
@@ -147,12 +191,16 @@ class _MessageBoxAdapter:
         parent=None,
     ) -> bool:
         _ = icon
-        result = QMessageBox.question(
-            _qt_parent(parent),
+        result = _MessageBoxAdapter._show(
             title,
             message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+            icon=QMessageBox.Icon.Question,
+            buttons=(
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No
+            ),
+            default=QMessageBox.StandardButton.No,
+            parent=parent,
         )
         return result == QMessageBox.StandardButton.Yes
 
@@ -230,9 +278,9 @@ class _WorkerSignals(QObject):
     completed = Signal(object, object)
     failed = Signal(object)
     progress = Signal(str)
-    scan_device = Signal(object)
-    scan_completed = Signal(object)
-    scan_failed = Signal(object)
+    scan_device = Signal(int, object)
+    scan_completed = Signal(int, object)
+    scan_failed = Signal(int, object)
 
 
 class ToneSlapperWindow(QMainWindow):
@@ -243,12 +291,13 @@ class ToneSlapperWindow(QMainWindow):
     BUILD_SUCCESS_MS = 3000
     UPLOAD_FINISH_MS = 6000
     UPLOAD_FINISH_INTERVAL_MS = 50
+    SCAN_ANIMATION_MS = 350
 
     def __init__(self) -> None:
         super().__init__()
         self.root = self
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
-        self.resize(820, 736)
+        self.resize(820, 764)
         self.setMinimumSize(680, 700)
         self.setWindowIcon(QIcon(str(asset_path("icons/app_icon.ico"))))
 
@@ -262,6 +311,10 @@ class ToneSlapperWindow(QMainWindow):
         self.last_build: BuildResult | None = None
         self.busy = False
         self.scan_active = False
+        self._scan_generation = 0
+        self._scan_cancel: threading.Event | None = None
+        self._scan_animation_job: QTimer | None = None
+        self._scan_dot_count = 0
         self.active_operation: str | None = None
         self.active_total_packets = 0
         self._build_status_job: QTimer | None = None
@@ -337,7 +390,7 @@ class ToneSlapperWindow(QMainWindow):
         central = QWidget(self)
         self.setCentralWidget(central)
         outer = QVBoxLayout(central)
-        outer.setContentsMargins(18, 4, 18, 10)
+        outer.setContentsMargins(18, 16, 18, 10)
         outer.setSpacing(0)
 
         device_row = QHBoxLayout()
@@ -351,11 +404,19 @@ class ToneSlapperWindow(QMainWindow):
         )
         self.device_combo.currentTextChanged.connect(self._combo_changed)
         device_row.addWidget(self.device_combo, 1)
-        self.scan_button = QPushButton(self.SCAN_TEXT, central)
+        self.scan_button = UppercaseButton(self.SCAN_TEXT, central)
         self.scan_button.setObjectName("scanButton")
         self.scan_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.scan_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.scan_button.setFixedWidth(218)
+        self._scan_glow = QGraphicsDropShadowEffect(self.scan_button)
+        self._scan_glow.setBlurRadius(34)
+        self._scan_glow.setOffset(0, 0)
+        glow_color = QColor(COLORS["accent_glow"])
+        glow_color.setAlpha(102)
+        self._scan_glow.setColor(glow_color)
+        self._scan_glow.setEnabled(False)
+        self.scan_button.setGraphicsEffect(self._scan_glow)
         self.scan_button.clicked.connect(self.scan)
         device_row.addWidget(self.scan_button)
         outer.addLayout(device_row)
@@ -373,16 +434,18 @@ class ToneSlapperWindow(QMainWindow):
         self.prompt_empty_label = QLabel("Select a device first", self.prompt_card)
         self.prompt_empty_label.setObjectName("promptEmpty")
         self.prompt_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.prompt_empty_label.setFont(emphasis_font(18))
+        self.prompt_empty_label.setFont(heavy_font(32))
         self.prompt_stack.addWidget(self.prompt_empty_label)
 
         self.prompt_tree = PromptTable(self.prompt_card)
+        self.prompt_tree.setFont(body_font(10))
         self.prompt_tree.setColumnCount(4)
         self.prompt_tree.setHorizontalHeaderLabels(
             ("INDEX", "EVENT", "AUDIO SOURCE", "")
         )
         self.prompt_tree.verticalHeader().hide()
         header = self.prompt_tree.horizontalHeader()
+        header.setFont(emphasis_font(10))
         header.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         header.viewport().setAttribute(
             Qt.WidgetAttribute.WA_TranslucentBackground,
@@ -404,6 +467,7 @@ class ToneSlapperWindow(QMainWindow):
         self.prompt_tree.row_hovered.connect(self._prompt_row_hovered)
         self.prompt_stack.addWidget(self.prompt_tree)
         outer.addWidget(self.prompt_card, 1)
+        outer.addSpacing(16)
 
         action_controls = QVBoxLayout()
         action_controls.setContentsMargins(14, 0, 14, 8)
@@ -414,7 +478,7 @@ class ToneSlapperWindow(QMainWindow):
         self.workflow_stack = QStackedLayout(self.workflow_slot)
         self.workflow_stack.setContentsMargins(0, 0, 0, 0)
 
-        self.build_button = QPushButton(self.BUILD_TEXT, self.workflow_slot)
+        self.build_button = UppercaseButton(self.BUILD_TEXT, self.workflow_slot)
         self.build_button.setObjectName("buildButton")
         self.build_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.build_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -422,6 +486,7 @@ class ToneSlapperWindow(QMainWindow):
         self.build_button_row = AdaptiveButtonRow(
             self.build_button,
             self.workflow_slot,
+            maximum_button_width=320,
         )
         self.workflow_stack.addWidget(self.build_button_row)
 
@@ -450,14 +515,14 @@ class ToneSlapperWindow(QMainWindow):
         package_layout.setContentsMargins(0, 0, 0, 0)
         package_layout.setSpacing(4)
 
-        self.validate_button = QPushButton(self.OPEN_TEXT, self.package_row)
+        self.validate_button = UppercaseButton(self.OPEN_TEXT, self.package_row)
         self.validate_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.validate_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.validate_button.clicked.connect(self._open_button_pressed)
         self._set_button_style(self.validate_button, role="path", available=False)
         package_layout.addWidget(self.validate_button, 1)
 
-        self.clear_package_button = QPushButton("×", self.package_row)
+        self.clear_package_button = UppercaseButton("×", self.package_row)
         self.clear_package_button.setAccessibleName("Unload sound pack")
         self.clear_package_button.setToolTip("Unload sound pack")
         self.clear_package_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -471,6 +536,7 @@ class ToneSlapperWindow(QMainWindow):
         self.package_button_row = AdaptiveButtonRow(
             self.package_row,
             central,
+            maximum_button_width=320,
         )
         action_controls.addWidget(self.package_button_row)
         action_controls.addSpacing(32)
@@ -480,6 +546,7 @@ class ToneSlapperWindow(QMainWindow):
         self.upload_button_row = AdaptiveButtonRow(
             self.upload_button,
             central,
+            maximum_button_width=320,
         )
         self.upload_button.progress_mode_changed.connect(
             self.upload_button_row.set_expanded
@@ -514,7 +581,7 @@ class ToneSlapperWindow(QMainWindow):
         utility_footer = QHBoxLayout()
         utility_footer.setContentsMargins(14, 0, 14, 0)
         utility_footer.setSpacing(8)
-        self.help_button = QPushButton("Help", central)
+        self.help_button = UppercaseButton("Help", central)
         self.help_button.setIcon(
             QIcon(str(asset_path("icons/material_help_outline_white_18.png")))
         )
@@ -525,7 +592,7 @@ class ToneSlapperWindow(QMainWindow):
         self._set_button_style(self.help_button, role="link")
         utility_footer.addWidget(self.help_button)
         utility_footer.addStretch(1)
-        self.support_button = QPushButton("Support development", central)
+        self.support_button = UppercaseButton("Support development", central)
         self.support_button.setIcon(
             QIcon(str(asset_path("icons/material_favorite_white_18.png")))
         )
@@ -544,7 +611,7 @@ class ToneSlapperWindow(QMainWindow):
         *,
         role: str = "",
     ) -> QPushButton:
-        button = QPushButton(text)
+        button = UppercaseButton(text)
         button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.clicked.connect(callback)
@@ -900,6 +967,7 @@ class ToneSlapperWindow(QMainWindow):
         if not self.assignments:
             self._show_flying_tip(self.build_button, "choose a sound first")
             return
+        self._stop_scan()
         self.build()
 
     def _open_button_pressed(self) -> None:
@@ -918,9 +986,11 @@ class ToneSlapperWindow(QMainWindow):
     def _upload_button_pressed(self) -> None:
         if self.busy:
             return
-        if self.scan_active:
+        if self.scan_active and not self._has_workflow_content():
             self._show_flying_tip(self.upload_button, "wait for scan to finish")
             return
+        if self.scan_active and self.last_build is not None:
+            self._stop_scan()
         if self.last_build is None:
             self._show_flying_tip(self.upload_button, "build or open first")
             return
@@ -933,8 +1003,13 @@ class ToneSlapperWindow(QMainWindow):
         if self.busy:
             return
         if self.scan_active:
-            self._show_flying_tip(self.recovery_button, "wait for scan to finish")
-            return
+            if self._device_identifier() is None or self._selected_profile_id() is None:
+                self._show_flying_tip(
+                    self.recovery_button,
+                    "wait for scan to find a device",
+                )
+                return
+            self._stop_scan()
         if self._device_identifier() is None or self._selected_profile_id() is None:
             self._show_flying_tip(self.recovery_button, "select connected device")
             return
@@ -947,13 +1022,44 @@ class ToneSlapperWindow(QMainWindow):
         self._flying_tip.dismiss()
 
     def _truncate_path(self, path: Path) -> str:
-        width = max(100, self.prompt_tree.columnWidth(2) - 22)
+        width = max(100, self.prompt_tree.columnWidth(2) - 40)
         metrics = QFontMetrics(self.prompt_tree.font())
-        return metrics.elidedText(
-            str(path),
+        filename = path.name or str(path)
+        if metrics.horizontalAdvance(filename) > width:
+            extension = path.suffix
+            if extension:
+                extension_width = metrics.horizontalAdvance(extension)
+                stem_width = width - extension_width
+                if stem_width > metrics.horizontalAdvance("…"):
+                    shortened_stem = metrics.elidedText(
+                        path.stem,
+                        Qt.TextElideMode.ElideLeft,
+                        stem_width,
+                    )
+                    return f"{shortened_stem}{extension}"
+            return metrics.elidedText(
+                filename,
+                Qt.TextElideMode.ElideLeft,
+                width,
+            )
+
+        parent = str(path.parent)
+        if not parent or parent == ".":
+            return filename
+        suffix = f"{os.sep}{filename}"
+        full_path = f"{parent}{suffix}"
+        if metrics.horizontalAdvance(full_path) <= width:
+            return full_path
+
+        parent_width = width - metrics.horizontalAdvance(suffix)
+        if parent_width <= metrics.horizontalAdvance("…"):
+            return filename
+        shortened_parent = metrics.elidedText(
+            parent,
             Qt.TextElideMode.ElideLeft,
-            width,
+            parent_width,
         )
+        return f"{shortened_parent}{suffix}"
 
     def _refresh_package_text(self, value: str | None = None) -> None:
         text = self.output_var.get() if value is None else value
@@ -965,7 +1071,7 @@ class ToneSlapperWindow(QMainWindow):
         if loaded_path is not None and text == loaded_path:
             width = max(100, self.validate_button.width() - 20)
             metrics = QFontMetrics(self.validate_button.font())
-            self.validate_button.setText(
+            self.validate_button.set_literal_text(
                 metrics.elidedText(
                     text,
                     Qt.TextElideMode.ElideMiddle,
@@ -1082,7 +1188,7 @@ class ToneSlapperWindow(QMainWindow):
             if self.busy:
                 foreground = COLORS["disabled"]
             elif column == 2 and index in self.assignments:
-                foreground = "#ffad98"
+                foreground = COLORS["accent_text"]
             else:
                 foreground = COLORS["text"]
             item.setForeground(QBrush(QColor(foreground)))
@@ -1120,6 +1226,7 @@ class ToneSlapperWindow(QMainWindow):
                     parent=self,
                 )
                 return
+            self._stop_scan()
             self.assignments[index] = Path(selected)
             self._invalidate_build()
             self._refresh_prompt_rows()
@@ -1186,9 +1293,7 @@ class ToneSlapperWindow(QMainWindow):
         self.busy = True
         self.active_operation = operation_name
         self.active_total_packets = total_packets
-        if operation_name == "scan":
-            self.scan_button.setText("Scanning…")
-        elif operation_name == "build":
+        if operation_name == "build":
             self.build_button.setText("Preparing audio…")
         elif operation_name == "open":
             self.output_var.set("Opening and validating…")
@@ -1238,9 +1343,8 @@ class ToneSlapperWindow(QMainWindow):
         self.busy = False
         self.active_operation = None
         self.active_total_packets = 0
-        self.scan_button.setText(
-            "Scanning…" if self.scan_active else self.SCAN_TEXT
-        )
+        if not self.scan_active:
+            self.scan_button.setText(self.SCAN_TEXT)
         self.build_button.setText(self.BUILD_TEXT)
         self.output_var.set(
             str(self.last_build.output) if self.last_build else self.OPEN_TEXT
@@ -1288,35 +1392,82 @@ class ToneSlapperWindow(QMainWindow):
         elif message.startswith("Device accepted image"):
             self.upload_button.set_progress(0.96, "Finishing…")
 
+    def _has_workflow_content(self) -> bool:
+        return bool(self.assignments) or self.last_build is not None
+
+    def _advance_scan_animation(self) -> None:
+        self._scan_animation_job = None
+        if not self.scan_active:
+            self.scan_button.setText(self.SCAN_TEXT)
+            return
+        self.scan_button.setText(
+            f"Scanning{'.' * self._scan_dot_count}"
+        )
+        self._scan_dot_count = (self._scan_dot_count + 1) % 4
+        self._scan_animation_job = self.root.after(
+            self.SCAN_ANIMATION_MS,
+            self._advance_scan_animation,
+        )
+
+    def _start_scan_animation(self) -> None:
+        self.root.after_cancel(self._scan_animation_job)
+        self._scan_animation_job = None
+        self._scan_dot_count = 0
+        self._advance_scan_animation()
+
+    def _stop_scan_animation(self) -> None:
+        self.root.after_cancel(self._scan_animation_job)
+        self._scan_animation_job = None
+        self._scan_dot_count = 0
+        self.scan_button.setText(self.SCAN_TEXT)
+
+    def _stop_scan(self) -> bool:
+        if not self.scan_active:
+            return False
+        if self._scan_cancel is not None:
+            self._scan_cancel.set()
+        self._scan_cancel = None
+        self._scan_generation += 1
+        self.scan_active = False
+        self._stop_scan_animation()
+        self._update_buttons()
+        return True
+
     def scan(self) -> None:
         if self.busy or self.scan_active:
             return
         self._reset_upload_success()
+        self._scan_generation += 1
+        generation = self._scan_generation
+        cancel_event = threading.Event()
+        self._scan_cancel = cancel_event
         self.scan_active = True
-        self.scan_button.setText("Scanning…")
-        self.devices.clear()
-        self.device_models.clear()
-        self.device_combo.blockSignals(True)
-        self.device_combo.clear()
-        self.device_combo.setCurrentIndex(-1)
-        self.device_combo.blockSignals(False)
-        self.device_var.set("")
+        self._start_scan_animation()
         self._update_buttons()
 
         def worker() -> None:
             try:
                 devices = self.engine.scan(
-                    on_discovered=self._signals.scan_device.emit,
+                    on_discovered=lambda device: self._signals.scan_device.emit(
+                        generation,
+                        device,
+                    ),
+                    cancel_event=cancel_event,
                 )
             except Exception as error:
                 traceback.print_exc()
-                self._signals.scan_failed.emit(error)
+                self._signals.scan_failed.emit(generation, error)
             else:
-                self._signals.scan_completed.emit(devices)
+                self._signals.scan_completed.emit(generation, devices)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _add_scanned_device(self, device) -> bool:
+    def _add_scanned_device(
+        self,
+        device,
+        *,
+        select_if_empty: bool = True,
+    ) -> bool:
         model = device.name or ""
         profile = resolve_device_profile(model)
         if profile is None:
@@ -1338,7 +1489,7 @@ class ToneSlapperWindow(QMainWindow):
         self.device_combo.blockSignals(True)
         self.device_combo.addItem(display)
         self.device_combo.blockSignals(False)
-        if not self.device_var.get():
+        if select_if_empty and not self.device_var.get():
             self.device_combo.blockSignals(True)
             self.device_combo.setCurrentText(display)
             self.device_combo.blockSignals(False)
@@ -1346,19 +1497,56 @@ class ToneSlapperWindow(QMainWindow):
             self._device_selected()
         return True
 
-    def _scan_device_discovered(self, device) -> None:
-        if not self.scan_active:
+    def _scan_device_discovered(self, generation: int, device=None) -> None:
+        if device is None:
+            device = generation
+            generation = self._scan_generation
+        if not self.scan_active or generation != self._scan_generation:
             return
         self._add_scanned_device(device)
 
-    def _scan_complete(self, devices) -> None:
-        if not self.scan_active:
-            return
+    def _replace_scanned_devices(self, devices) -> None:
+        selected_address = self._device_identifier()
+        self.devices.clear()
+        self.device_models.clear()
+        self.device_combo.blockSignals(True)
+        self.device_combo.clear()
+        self.device_combo.blockSignals(False)
         for device in devices:
-            self._add_scanned_device(device)
+            self._add_scanned_device(device, select_if_empty=False)
+
+        selected_display = ""
+        if selected_address is not None:
+            selected_display = next(
+                (
+                    display
+                    for display, address in self.devices.items()
+                    if address.casefold() == selected_address.casefold()
+                ),
+                "",
+            )
+        if not selected_display and self.devices:
+            selected_display = next(iter(self.devices))
+
+        self.device_combo.blockSignals(True)
+        if selected_display:
+            self.device_combo.setCurrentText(selected_display)
+        else:
+            self.device_combo.setCurrentIndex(-1)
+        self.device_combo.blockSignals(False)
+        self.device_var.set(selected_display)
+        if selected_display:
+            self._device_selected()
+        else:
+            self._update_buttons()
+
+    def _scan_complete(self, generation: int, devices) -> None:
+        if not self.scan_active or generation != self._scan_generation:
+            return
+        self._scan_cancel = None
         self.scan_active = False
-        self.scan_button.setText(self.SCAN_TEXT)
-        self._update_buttons()
+        self._stop_scan_animation()
+        self._replace_scanned_devices(devices)
         if not self.devices:
             messagebox.showinfo(
                 APP_NAME,
@@ -1366,11 +1554,12 @@ class ToneSlapperWindow(QMainWindow):
                 parent=self,
             )
 
-    def _scan_failed(self, error: Exception) -> None:
-        if not self.scan_active:
+    def _scan_failed(self, generation: int, error: Exception) -> None:
+        if not self.scan_active or generation != self._scan_generation:
             return
+        self._scan_cancel = None
         self.scan_active = False
-        self.scan_button.setText(self.SCAN_TEXT)
+        self._stop_scan_animation()
         self._update_buttons()
         messagebox.showerror(
             APP_NAME,
@@ -1644,6 +1833,7 @@ class ToneSlapperWindow(QMainWindow):
         if not selected:
             return
         path = Path(selected)
+        self._stop_scan()
         self._invalidate_build()
         self._run_background(
             "open",
@@ -1808,9 +1998,15 @@ class ToneSlapperWindow(QMainWindow):
 
         self.device_combo.setEnabled(not self.busy)
         self.scan_button.setEnabled(not self.busy and not self.scan_active)
+        self.scan_button.setProperty("scanning", self.scan_active)
         self._set_button_style(
             self.scan_button,
             role="" if self.devices else "accent",
+        )
+        self._scan_glow.setEnabled(
+            not self.devices
+            and self.scan_button.isEnabled()
+            and not self.scan_active
         )
 
         build_available = (
@@ -1855,16 +2051,22 @@ class ToneSlapperWindow(QMainWindow):
             self.last_build is not None
             and self.last_build.profile_id == selected_profile_id
         )
+        scan_blocks_workflow = (
+            self.scan_active
+            and not self._has_workflow_content()
+        )
         self.upload_button.set_enabled(not self.busy)
         self.upload_button.set_available(
-            has_device and loaded_profile_matches and not self.scan_active
+            has_device
+            and loaded_profile_matches
+            and not scan_blocks_workflow
         )
 
         self.recovery_button.setEnabled(not self.busy)
         self._set_button_style(
             self.recovery_button,
             role="recovery",
-            available=has_device and not self.scan_active,
+            available=has_device,
         )
 
         self.prompt_tree.viewport().setCursor(

@@ -19,6 +19,7 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPainter,
     QPainterPath,
+    QPixmap,
     QPolygon,
 )
 from PySide6.QtWidgets import (
@@ -34,9 +35,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .fonts import emphasis_font
+from .fonts import body_font, emphasis_font
 from .resources import asset_path
 from .theme import COLORS
+
+
+def _tinted_icon(relative_path: str, color: str) -> QIcon:
+    source = QPixmap(str(asset_path(relative_path)))
+    tinted = QPixmap(source.size())
+    tinted.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(tinted)
+    painter.drawPixmap(0, 0, source)
+    painter.setCompositionMode(
+        QPainter.CompositionMode.CompositionMode_SourceIn
+    )
+    painter.fillRect(tinted.rect(), QColor(color))
+    painter.end()
+    return QIcon(tinted)
 
 
 class MinimalComboBox(QComboBox):
@@ -116,7 +131,18 @@ class AdaptiveButtonRow(QWidget):
         self._layout.activate()
 
 
-class ProgressButton(QPushButton):
+class UppercaseButton(QPushButton):
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(text.upper(), parent)
+
+    def setText(self, text: str) -> None:
+        super().setText(text.upper())
+
+    def set_literal_text(self, text: str) -> None:
+        super().setText(text)
+
+
+class ProgressButton(UppercaseButton):
     progress_mode_changed = Signal(bool)
 
     def __init__(self, text: str, parent: QWidget | None = None) -> None:
@@ -127,7 +153,7 @@ class ProgressButton(QPushButton):
         self._success = False
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFont(emphasis_font(14))
+        self.setFont(body_font(10))
         self.setMinimumHeight(46)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
@@ -193,7 +219,7 @@ class ProgressButton(QPushButton):
         elif self._progress_active:
             background = COLORS["surface_hover"]
         elif not self._available:
-            background = "#2a2a2a"
+            background = COLORS["disabled_surface"]
         elif self.isDown():
             background = COLORS["accent_pressed"]
         elif self.underMouse():
@@ -223,17 +249,24 @@ class ProgressButton(QPushButton):
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
 
 
-class ResetButton(QPushButton):
+class ResetButton(UppercaseButton):
     hovered = Signal(bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Reset", parent)
         self._enabled_for_row = True
         self._row_hovered = False
-        self._normal_icon = QIcon(str(asset_path("icons/material_refresh_accent_18.png")))
-        self._hover_icon = QIcon(str(asset_path("icons/material_refresh_hover_18.png")))
-        self._disabled_icon = QIcon(
-            str(asset_path("icons/material_refresh_disabled_18.png"))
+        self._normal_icon = _tinted_icon(
+            "icons/material_refresh_hover_18.png",
+            COLORS["accent_hover"],
+        )
+        self._hover_icon = _tinted_icon(
+            "icons/material_refresh_hover_18.png",
+            "#ffffff",
+        )
+        self._disabled_icon = _tinted_icon(
+            "icons/material_refresh_hover_18.png",
+            COLORS["disabled"],
         )
         self.setObjectName("resetButton")
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)

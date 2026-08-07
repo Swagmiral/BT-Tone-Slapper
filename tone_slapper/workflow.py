@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import json
 import tempfile
+import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -205,6 +206,7 @@ class ToneSlapperEngine:
     def scan(
         timeout: float = 8.0,
         on_discovered: Callable[[DiscoveredDevice], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> list[DiscoveredDevice]:
         manufacturer = TUNE_720BT_PROFILE.display_name.partition(" ")[0]
 
@@ -221,6 +223,8 @@ class ToneSlapperEngine:
         }
         if on_discovered is not None:
             scan_options["on_discovered"] = report_supported
+        if cancel_event is not None:
+            scan_options["cancel_event"] = cancel_event
         devices = asyncio.run(scan_devices(**scan_options))
         return [device for device in devices if resolve_device_profile(device.name) is not None]
 

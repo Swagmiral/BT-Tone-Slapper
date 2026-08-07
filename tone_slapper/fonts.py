@@ -89,6 +89,14 @@ def emphasis_font(size: int) -> QFont:
     )
 
 
+def heavy_font(size: int) -> QFont:
+    return _configured_font(
+        emphasis_family(),
+        size,
+        QFont.Weight.Black,
+    )
+
+
 def apply_variable_font_axes(root: QWidget) -> None:
     if not _bundled_fonts_loaded:
         return

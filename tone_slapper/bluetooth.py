@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 from dataclasses import asdict, dataclass
 from typing import Any, Awaitable, Callable
 
@@ -258,6 +259,7 @@ async def scan_devices(
     cached_provider: Callable[[], list[DiscoveredDevice]] | None = None,
     connected_provider: Callable[[], Awaitable[set[str]]] | None = None,
     on_discovered: Callable[[DiscoveredDevice], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> list[DiscoveredDevice]:
     if scanner is None:
         from bleak import BleakScanner
@@ -270,6 +272,8 @@ async def scan_devices(
         connected_provider = _windows_connected_bluetooth_identities
 
     connected_identities = await connected_provider()
+    if cancel_event is not None and cancel_event.is_set():
+        return []
     normalized_filter = _device_identity(name_contains)
     if normalized_filter:
         connected_identities = {
@@ -282,6 +286,8 @@ async def scan_devices(
     results: dict[str, DiscoveredDevice] = {}
 
     def record_live(device: Any, advertisement: Any) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            return
         name = advertisement.local_name or device.name
         if name_filter and name_filter not in (name or "").casefold():
             return
@@ -314,7 +320,12 @@ async def scan_devices(
         )
         await live_scanner.start()
         try:
-            await asyncio.sleep(timeout)
+            deadline = asyncio.get_running_loop().time() + max(0.0, timeout)
+            while cancel_event is None or not cancel_event.is_set():
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(0.05, remaining))
         finally:
             await live_scanner.stop()
         for device, advertisement in (
@@ -324,6 +335,8 @@ async def scan_devices(
 
     live_identities = {_device_identity(device.name) for device in results.values() if device.name}
     for cached in cached_provider():
+        if cancel_event is not None and cancel_event.is_set():
+            break
         if name_filter and name_filter not in (cached.name or "").casefold():
             continue
         if _device_identity(cached.name) not in connected_identities:

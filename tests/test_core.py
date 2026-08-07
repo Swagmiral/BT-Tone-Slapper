@@ -5,6 +5,7 @@ import asyncio
 import os
 import struct
 import sys
+import threading
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -125,8 +126,8 @@ class CoreTests(unittest.TestCase):
                 QFontInfo(prompt_empty_font).family(),
                 EMPHASIS_FONT_FAMILY,
             )
-            self.assertEqual(prompt_empty_font.pointSize(), 18)
-            self.assertEqual(prompt_empty_font.weight(), QFont.Weight.Bold)
+            self.assertEqual(prompt_empty_font.pointSize(), 32)
+            self.assertEqual(prompt_empty_font.weight(), QFont.Weight.Black)
             self.assertGreaterEqual(window.prompt_empty_label.sizeHint().height(), 28)
             self.assertIs(
                 window.prompt_stack.currentWidget(),
@@ -159,6 +160,20 @@ class CoreTests(unittest.TestCase):
                 window.prompt_tree,
             )
             self.assertEqual(window.prompt_tree.rowCount(), 11)
+            prompt_font = window.prompt_tree.font()
+            header_font = window.prompt_tree.horizontalHeader().font()
+            self.assertEqual(
+                QFontInfo(prompt_font).family(),
+                BODY_FONT_FAMILY,
+            )
+            self.assertEqual(prompt_font.pointSize(), 10)
+            self.assertEqual(prompt_font.weight(), QFont.Weight.Medium)
+            self.assertEqual(
+                QFontInfo(header_font).family(),
+                EMPHASIS_FONT_FAMILY,
+            )
+            self.assertEqual(header_font.pointSize(), 10)
+            self.assertEqual(header_font.weight(), QFont.Weight.Bold)
             self.assertEqual(
                 window.prompt_tree.item(10, 1).text(),
                 "Maximum volume",
@@ -266,6 +281,29 @@ class CoreTests(unittest.TestCase):
             window.destroy()
             self.qt_application.processEvents()
 
+    def test_audio_source_path_prioritizes_filename(self) -> None:
+        window = ToneSlapperWindow()
+        window.show()
+        try:
+            window.target_profile_id = TUNE_720BT_PROFILE.profile_id
+            window._refresh_prompt_rows()
+            self.qt_application.processEvents()
+            filename = "My Carefully Named Maximum Volume Sound.wav"
+            source = Path("D:/") / Path(*(["Very Long Folder Name"] * 20)) / filename
+            shortened = window._truncate_path(source)
+
+            self.assertTrue(shortened.endswith(filename))
+            self.assertNotEqual(shortened, str(source))
+
+            oversized_filename = f"{'important-ending-' * 30}final.wav"
+            oversized = window._truncate_path(Path("D:/Audio") / oversized_filename)
+            self.assertTrue(oversized.startswith("…"))
+            self.assertTrue(oversized.endswith("final.wav"))
+            self.assertNotIn("Audio", oversized)
+        finally:
+            window.destroy()
+            self.qt_application.processEvents()
+
     def test_open_existing_is_prominent_without_custom_audio(self) -> None:
         window = ToneSlapperWindow()
         window.hide()
@@ -285,7 +323,7 @@ class CoreTests(unittest.TestCase):
                 window.open_divider,
             )
             self.assertEqual(window.open_divider_label.text(), "OR")
-            self.assertEqual(window.validate_button.text(), "Open sound pack…")
+            self.assertEqual(window.validate_button.text(), "OPEN SOUND PACK…")
             self.assertEqual(
                 window.validate_button.property("role"),
                 "openProminent",
@@ -372,7 +410,7 @@ class CoreTests(unittest.TestCase):
             open_existing.assert_not_called()
             self.assertIsNone(window.last_build)
             self.assertFalse(window.clear_package_button.isVisible())
-            self.assertEqual(window.validate_button.text(), "Open sound pack…")
+            self.assertEqual(window.validate_button.text(), "OPEN SOUND PACK…")
             self.assertEqual(
                 window.validate_button.property("role"),
                 "openProminent",
@@ -429,9 +467,15 @@ class CoreTests(unittest.TestCase):
             self.assertTrue(window.prompt_tree.isEnabled())
 
             window.assignments[0] = Path("custom.wav")
+            window.last_build = SimpleNamespace(
+                output=OEM_SAMPLE,
+                profile_id=TUNE_720BT_PROFILE.profile_id,
+            )
+            window.output_var.set(str(OEM_SAMPLE))
             window._update_buttons()
             self.assertTrue(window.build_button.isEnabled())
             self.assertTrue(window.build_button.property("available"))
+            self.assertTrue(window.upload_button._available)
 
             window._scan_device_discovered(second)
             self.assertEqual(window.device_combo.count(), 2)
@@ -441,10 +485,107 @@ class CoreTests(unittest.TestCase):
             window.device_combo.setCurrentText(second_display)
             self.qt_application.processEvents()
             self.assertEqual(window.device_var.get(), second_display)
+            self.assertEqual(window.assignments[0], Path("custom.wav"))
+            self.assertIsNotNone(window.last_build)
+            self.assertTrue(window.build_button.property("available"))
+            self.assertTrue(window.upload_button._available)
 
             window._scan_device_discovered(third)
             self.assertEqual(window.device_combo.count(), 3)
             self.assertEqual(window.device_var.get(), second_display)
+            self.assertTrue(window.recovery_button.property("available"))
+            with patch.object(window, "restore") as restore:
+                window._recovery_button_pressed()
+            self.assertFalse(window.scan_active)
+            restore.assert_called_once_with()
+        finally:
+            window.destroy()
+            self.qt_application.processEvents()
+
+    def test_audio_or_package_selection_stops_active_scan(self) -> None:
+        window = ToneSlapperWindow()
+        window.hide()
+        try:
+            window.target_profile_id = TUNE_720BT_PROFILE.profile_id
+            window._refresh_prompt_rows()
+
+            audio_cancel = threading.Event()
+            window.scan_active = True
+            window._scan_cancel = audio_cancel
+            window._scan_generation = 4
+            with patch(
+                "tone_slapper.gui.filedialog.askopenfilename",
+                return_value="D:/CustomSound/MaxVolume.wav",
+            ):
+                window._choose_audio_for(10)
+
+            self.assertTrue(audio_cancel.is_set())
+            self.assertFalse(window.scan_active)
+            self.assertEqual(window._scan_generation, 5)
+            self.assertEqual(
+                window.assignments[10],
+                Path("D:/CustomSound/MaxVolume.wav"),
+            )
+            self.assertTrue(window.build_button.property("available"))
+
+            package_cancel = threading.Event()
+            window.scan_active = True
+            window._scan_cancel = package_cancel
+            window._scan_generation = 8
+            with (
+                patch(
+                    "tone_slapper.gui.filedialog.askopenfilename",
+                    return_value="D:/SoundPacks/MyPack.bin",
+                ),
+                patch.object(window, "_run_background") as run_background,
+            ):
+                window.open_existing()
+
+            self.assertTrue(package_cancel.is_set())
+            self.assertFalse(window.scan_active)
+            self.assertEqual(window._scan_generation, 9)
+            run_background.assert_called_once()
+        finally:
+            window.destroy()
+            self.qt_application.processEvents()
+
+    def test_manual_rescan_keeps_content_workflow_available(self) -> None:
+        window = ToneSlapperWindow()
+        window.hide()
+        try:
+            display = TUNE_720BT_PROFILE.display_name
+            window.devices[display] = "02:00:00:00:00:50"
+            window.device_models[display] = display
+            window.device_var.set(display)
+            window.target_profile_id = TUNE_720BT_PROFILE.profile_id
+            window.assignments[0] = Path("custom.wav")
+            window.last_build = SimpleNamespace(
+                output=OEM_SAMPLE,
+                profile_id=TUNE_720BT_PROFILE.profile_id,
+            )
+            with patch("tone_slapper.gui.threading.Thread") as thread_factory:
+                window.scan()
+
+            thread_factory.return_value.start.assert_called_once_with()
+            self.assertTrue(window.scan_active)
+            self.assertEqual(window.scan_button.text(), "SCANNING")
+            self.assertEqual(window.device_var.get(), display)
+            self.assertEqual(
+                window.devices[display],
+                "02:00:00:00:00:50",
+            )
+            self.assertTrue(window.build_button.property("available"))
+            self.assertTrue(window.upload_button._available)
+
+            cancel_event = window._scan_cancel
+            with patch.object(window, "upload") as upload:
+                window._upload_button_pressed()
+
+            self.assertIsNotNone(cancel_event)
+            self.assertTrue(cancel_event.is_set())
+            self.assertFalse(window.scan_active)
+            self.assertEqual(window.scan_button.text(), "SCAN FOR DEVICES")
+            upload.assert_called_once_with()
         finally:
             window.destroy()
             self.qt_application.processEvents()
@@ -456,10 +597,21 @@ class CoreTests(unittest.TestCase):
             self.qt_application.processEvents()
             idle_width = window.upload_button.width()
 
-            self.assertLessEqual(window.build_button.width(), 480)
-            self.assertLessEqual(idle_width, 480)
-            self.assertLessEqual(window.package_row.width(), 480)
-            self.assertLessEqual(window.validate_button.width(), 480)
+            self.assertEqual(
+                window.build_button_row.maximum_button_width,
+                window.upload_button_row.maximum_button_width,
+            )
+            self.assertEqual(
+                window.build_button_row.maximum_button_width,
+                320,
+            )
+            self.assertLessEqual(idle_width, 320)
+            self.assertEqual(window.package_row.width(), idle_width)
+            self.assertLessEqual(window.validate_button.width(), 320)
+            self.assertEqual(
+                window.recovery_button.text(),
+                "Restore OEM English",
+            )
             self.assertEqual(
                 window.recovery_button.width(),
                 window.recovery_button.sizeHint().width(),
@@ -480,7 +632,7 @@ class CoreTests(unittest.TestCase):
             window.upload_button.complete()
             self.qt_application.processEvents()
             self.assertFalse(window.upload_button_row.expanded)
-            self.assertLessEqual(window.upload_button.width(), 480)
+            self.assertLessEqual(window.upload_button.width(), 320)
         finally:
             window.destroy()
             self.qt_application.processEvents()
@@ -1346,6 +1498,66 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(IncrementalScanner.instance.started)
         self.assertTrue(IncrementalScanner.instance.stopped)
         self.assertEqual(IncrementalScanner.instance.scanning_mode, "active")
+
+    def test_incremental_scan_honors_cancellation(self) -> None:
+        device = SimpleNamespace(
+            address="02:00:00:00:00:42",
+            name="JBL Tune720BT",
+        )
+        advertisement = SimpleNamespace(
+            local_name=None,
+            rssi=-44,
+            service_uuids=(),
+        )
+        cancel_event = threading.Event()
+
+        class CancellableScanner:
+            instance = None
+
+            def __init__(
+                self,
+                detection_callback,
+                *,
+                scanning_mode,
+            ) -> None:
+                self.callback = detection_callback
+                self.scanning_mode = scanning_mode
+                self.stopped = False
+                self.discovered_devices_and_advertisement_data = {
+                    device.address: (device, advertisement)
+                }
+                type(self).instance = self
+
+            async def start(self) -> None:
+                self.callback(device, advertisement)
+
+            async def stop(self) -> None:
+                self.stopped = True
+
+        async def connected_provider():
+            return {"jbltune720bt"}
+
+        reported = []
+
+        def report(discovered) -> None:
+            reported.append(discovered)
+            cancel_event.set()
+
+        results = asyncio.run(
+            scan_devices(
+                timeout=60,
+                name_contains="JBL",
+                scanner=CancellableScanner,
+                cached_provider=lambda: [],
+                connected_provider=connected_provider,
+                on_discovered=report,
+                cancel_event=cancel_event,
+            )
+        )
+
+        self.assertEqual(reported, [results[0]])
+        self.assertTrue(cancel_event.is_set())
+        self.assertTrue(CancellableScanner.instance.stopped)
 
     def test_live_scan_replaces_remembered_model(self) -> None:
         live_device = SimpleNamespace(
